@@ -70,6 +70,22 @@ extern bool nv_drm_vblank_module_param;
 /* Set to true when DRM color pipeline support is enabled. */
 extern bool nv_drm_color_pipeline_module_param;
 #endif
+/* Set to true when fence deadlines may boost GPU clocks. */
+extern bool nv_drm_deadline_boost_module_param;
+/* How long before a fence deadline to count a miss if it is still pending. */
+extern unsigned int nv_drm_deadline_boost_margin_us_module_param;
+/* Ignore deadlines set less than this far in the future. */
+extern unsigned int nv_drm_deadline_boost_min_lead_us_module_param;
+/* Number of deadline misses within a second that triggers a boost. */
+extern unsigned int nv_drm_deadline_boost_misses_module_param;
+/* Number of tight frames within the onset window that triggers a boost. */
+extern unsigned int nv_drm_deadline_boost_onset_frames_module_param;
+/* Length of the onset window in milliseconds. */
+extern unsigned int nv_drm_deadline_boost_onset_window_ms_module_param;
+/* Longest wait between boosts that follow each other; 0 disables backoff. */
+extern unsigned int nv_drm_deadline_boost_backoff_max_ms_module_param;
+/* Time without a boost trigger after which the backoff starts over. */
+extern unsigned int nv_drm_deadline_boost_backoff_reset_ms_module_param;
 
 void *nv_drm_calloc(size_t nmemb, size_t size);
 

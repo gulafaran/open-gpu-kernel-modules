@@ -46,6 +46,14 @@ bool nv_drm_modeset_module_param = true;
 bool nv_drm_fbdev_module_param = true;
 bool nv_drm_vblank_module_param = false;
 bool nv_drm_color_pipeline_module_param = true;
+bool nv_drm_deadline_boost_module_param = true;
+unsigned int nv_drm_deadline_boost_margin_us_module_param = 0;
+unsigned int nv_drm_deadline_boost_min_lead_us_module_param = 1000;
+unsigned int nv_drm_deadline_boost_misses_module_param = 3;
+unsigned int nv_drm_deadline_boost_onset_frames_module_param = 2;
+unsigned int nv_drm_deadline_boost_onset_window_ms_module_param = 2500;
+unsigned int nv_drm_deadline_boost_backoff_max_ms_module_param = 16000;
+unsigned int nv_drm_deadline_boost_backoff_reset_ms_module_param = 10000;
 
 void *nv_drm_calloc(size_t nmemb, size_t size)
 {

@@ -24,6 +24,7 @@
 
 #include "nvidia-drm-os-interface.h"
 #include "nvidia-drm.h"
+#include "nvidia-drm-fence.h"
 
 #include "nvidia-drm-conftest.h"
 
@@ -51,6 +52,81 @@ MODULE_PARM_DESC(
     color_pipeline,
     "Enable DRM color pipeline support (1 = enable (default), 0 = disable)");
 module_param_named(color_pipeline, nv_drm_color_pipeline_module_param, bool, 0444);
+#endif
+
+#if defined(NV_DMA_FENCE_OPS_HAS_SET_DEADLINE)
+MODULE_PARM_DESC(
+    deadline_boost,
+    "Boost GPU clocks when a fence is about to miss a deadline set by a waiter, "
+    "e.g. a compositor's page flip (1 = enable (default), 0 = disable)");
+module_param_named(deadline_boost, nv_drm_deadline_boost_module_param, bool, 0644);
+
+MODULE_PARM_DESC(
+    deadline_boost_margin_us,
+    "Count a deadline as missed if its fence is still pending this many "
+    "microseconds before the deadline (default 0)");
+module_param_named(deadline_boost_margin_us,
+                   nv_drm_deadline_boost_margin_us_module_param, uint, 0644);
+
+MODULE_PARM_DESC(
+    deadline_boost_min_lead_us,
+    "Ignore deadlines set less than this many microseconds in the future, "
+    "as they could not have been met (default 1000)");
+module_param_named(deadline_boost_min_lead_us,
+                   nv_drm_deadline_boost_min_lead_us_module_param, uint, 0644);
+
+MODULE_PARM_DESC(
+    deadline_boost_misses,
+    "Boost after this many deadline misses within one second (default 3)");
+module_param_named(deadline_boost_misses,
+                   nv_drm_deadline_boost_misses_module_param, uint, 0644);
+
+MODULE_PARM_DESC(
+    deadline_boost_onset_frames,
+    "Boost after this many tight frames (fences that signaled with less than "
+    "25% of their deadline lead to spare) within deadline_boost_onset_window_ms; "
+    "0 disables (default 2)");
+module_param_named(deadline_boost_onset_frames,
+                   nv_drm_deadline_boost_onset_frames_module_param, uint, 0644);
+
+MODULE_PARM_DESC(
+    deadline_boost_onset_window_ms,
+    "Window in milliseconds for deadline_boost_onset_frames (default 2500)");
+module_param_named(deadline_boost_onset_window_ms,
+                   nv_drm_deadline_boost_onset_window_ms_module_param, uint, 0644);
+
+MODULE_PARM_DESC(
+    deadline_boost_backoff_max_ms,
+    "Each boost triggered without deadline_boost_backoff_reset_ms of calm "
+    "since the previous trigger doubles the wait before the next boost, up to "
+    "this many milliseconds; 0 disables the backoff (default 16000)");
+module_param_named(deadline_boost_backoff_max_ms,
+                   nv_drm_deadline_boost_backoff_max_ms_module_param, uint, 0644);
+
+MODULE_PARM_DESC(
+    deadline_boost_backoff_reset_ms,
+    "Reset the boost backoff after this many milliseconds without a boost "
+    "trigger (default 10000)");
+module_param_named(deadline_boost_backoff_reset_ms,
+                   nv_drm_deadline_boost_backoff_reset_ms_module_param, uint, 0644);
+
+static int nv_drm_deadline_boost_stats_get(char *buf,
+                                           const struct kernel_param *kp)
+{
+    return nv_drm_fence_deadline_stats(buf, PAGE_SIZE);
+}
+
+static const struct kernel_param_ops nv_drm_deadline_boost_stats_ops = {
+    .get = nv_drm_deadline_boost_stats_get,
+};
+
+MODULE_PARM_DESC(
+    deadline_boost_stats,
+    "Fence deadline statistics: deadlines set and missed, bucketed by how far "
+    "in the future they were set, deadlines untracked (no free slot), "
+    "signaled early, checked at their deadline, and boosts requested");
+module_param_cb(deadline_boost_stats, &nv_drm_deadline_boost_stats_ops,
+                NULL, 0444);
 #endif
 
 #endif /* NV_DRM_AVAILABLE */
