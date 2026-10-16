@@ -310,7 +310,7 @@ static bool __nv_drm_deadline_request_boost(struct nv_drm_device *nv_dev)
                  nv_dev->deadline.boost_interval_ms);
 
     atomic64_inc(&nv_drm_deadline_boost_count);
-    queue_work(system_unbound_wq, &nv_dev->deadline.boost_work);
+    queue_work(nv_drm_dfl_wq, &nv_dev->deadline.boost_work);
 
     return true;
 }
