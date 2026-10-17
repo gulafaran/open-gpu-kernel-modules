@@ -120,6 +120,7 @@ NvBool nvkms_test_fail_alloc_core_channel(enum NvKmsFailAllocCoreChannelMethod m
 enum NvKmsFrlRateForce nvkms_force_frl_rate(void);
 NvBool nvkms_conceal_vrr_caps(void);
 NvBool nvkms_enhanced_pcon_support(void);
+NvBool nvkms_lazy_ctxdma_bind(void);
 NvBool nvkms_output_rounding_fix(void);
 NvBool nvkms_disable_hdmi_frl(void);
 NvBool nvkms_disable_vrr_memclk_switch(void);

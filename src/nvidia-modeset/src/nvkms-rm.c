@@ -2845,7 +2845,7 @@ NvBool nvRmAllocEvoDma(NVDevEvoPtr pDevEvo, NVEvoDmaPtr pDma,
     NvU32  memoryHandle = 0;
     void  *pBase = NULL;
 
-    NVSurfaceDescriptor surfaceDesc;
+    NVSurfaceDescriptor surfaceDesc = { };
     NvU32 localCtxDmaFlags = ctxDmaFlags |
         DRF_DEF(OS03, _FLAGS, _ACCESS, _READ_WRITE) |
         DRF_DEF(OS03, _FLAGS, _HASH_TABLE, _DISABLE);
@@ -3188,7 +3188,7 @@ static NvBool AllocSyncpt(NVDevEvoPtr pDevEvo, NVEvoChannelPtr pChannel,
     NvU32 id;
     NvKmsSyncPtOpParams params = { };
     NvBool result;
-    NVSurfaceDescriptor surfaceDesc;
+    NVSurfaceDescriptor surfaceDesc = { };
 
     if (!pDevEvo->supportsSyncpts) {
         return FALSE;
@@ -5959,7 +5959,7 @@ NvU32 nvRmAllocAndBindSurfaceDescriptor(
     NVSurfaceDescriptor *pSurfaceDesc,
     NvBool mapToDisplayRm)
 {
-    NVSurfaceDescriptor surfaceDesc;
+    NVSurfaceDescriptor surfaceDesc = { };
     NvU32 flags = DRF_DEF(OS03, _FLAGS, _HASH_TABLE, _DISABLE);
     NvU32 head, layer;
     NvU32 ret;
@@ -5995,6 +5995,21 @@ NvU32 nvRmAllocAndBindSurfaceDescriptor(
                                             &surfaceDesc);
     if (ret != NVOS_STATUS_SUCCESS) {
         goto free_this_handle_and_fail;
+    }
+
+    /*
+     * Binding to every window channel of every head costs one GSP RPC per
+     * channel, all under the global NVKMS lock (about 1 ms per surface on a
+     * 4-head GPU), while a surface is usually only ever shown in one or two
+     * windows. With lazy_ctxdma_bind, the window channels are bound on first
+     * use instead, by nvCtxDmaBindOnUse() in the HAL functions that program
+     * the descriptor into a window channel.
+     */
+    if (nvkms_lazy_ctxdma_bind()) {
+        surfaceDesc.lazyBind = TRUE;
+        surfaceDesc.lazyBoundChannelMask = 0;
+        *pSurfaceDesc = surfaceDesc;
+        return NVOS_STATUS_SUCCESS;
     }
 
     for (head = 0; head < pDevEvo->numHeads; head++) {

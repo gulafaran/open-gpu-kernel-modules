@@ -124,6 +124,12 @@ MODULE_PARM_DESC(conceal_vrr_caps,
 static bool conceal_vrr_caps = false;
 module_param_named(conceal_vrr_caps, conceal_vrr_caps, bool, 0444);
 
+MODULE_PARM_DESC(lazy_ctxdma_bind,
+                 "Bind surfaces to display window channels on first use instead of to all window channels at registration "
+                 "(each bind is a GSP RPC under the global NVKMS lock). Affects surfaces registered after a change.");
+static bool lazy_ctxdma_bind = true;
+module_param_named(lazy_ctxdma_bind, lazy_ctxdma_bind, bool, 0644);
+
 MODULE_PARM_DESC(enhanced_pcon_support,
                  "Enable enhanced display protocol converter features (e.g. VRR over active DP-HDMI converters)");
 static bool enhanced_pcon_support = false;
@@ -228,6 +234,11 @@ NvBool nvkms_conceal_vrr_caps(void)
 NvBool nvkms_enhanced_pcon_support(void)
 {
     return enhanced_pcon_support;
+}
+
+NvBool nvkms_lazy_ctxdma_bind(void)
+{
+    return READ_ONCE(lazy_ctxdma_bind);
 }
 
 NvBool nvkms_output_rounding_fix(void)
