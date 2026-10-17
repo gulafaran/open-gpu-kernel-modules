@@ -130,6 +130,12 @@ MODULE_PARM_DESC(lazy_ctxdma_bind,
 static bool lazy_ctxdma_bind = true;
 module_param_named(lazy_ctxdma_bind, lazy_ctxdma_bind, bool, 0644);
 
+MODULE_PARM_DESC(lazy_gpu_map,
+                 "Map registered surfaces into the NVKMS GPU address space (used by headSurface and DIFR) on first use "
+                 "instead of at registration. Affects surfaces registered after a change.");
+static bool lazy_gpu_map = true;
+module_param_named(lazy_gpu_map, lazy_gpu_map, bool, 0644);
+
 MODULE_PARM_DESC(enhanced_pcon_support,
                  "Enable enhanced display protocol converter features (e.g. VRR over active DP-HDMI converters)");
 static bool enhanced_pcon_support = false;
@@ -239,6 +245,11 @@ NvBool nvkms_enhanced_pcon_support(void)
 NvBool nvkms_lazy_ctxdma_bind(void)
 {
     return READ_ONCE(lazy_ctxdma_bind);
+}
+
+NvBool nvkms_lazy_gpu_map(void)
+{
+    return READ_ONCE(lazy_gpu_map);
 }
 
 NvBool nvkms_output_rounding_fix(void)

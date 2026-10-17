@@ -2855,6 +2855,14 @@ struct _NVSurfaceEvoRec {
     NvU64 gpuAddress;
 
     /*
+     * With lazy_gpu_map, gpuAddress is only mapped (with gpuMapPermissions)
+     * the first time headSurface or DIFR needs it: read it through
+     * nvHsGetSurfaceGpuAddress().
+     */
+    NvBool gpuMapPending;
+    enum NvHsMapPermissions gpuMapPermissions;
+
+    /*
      * HeadSurface needs a CPU mapping of surfaces containing semaphores.
      */
     void *cpuAddress[NVKMS_MAX_SUBDEVICES];

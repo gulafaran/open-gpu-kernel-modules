@@ -91,6 +91,7 @@
 
 
 #include "nvkms-difr.h"
+#include "nvkms-headsurface.h"
 #include "nvkms-push.h"
 #include "nvkms-rm.h"
 #include "nvkms-rmapi.h"
@@ -733,7 +734,7 @@ static NvBool PrefetchHelperSurfaceEvo(NVDIFRStateEvoPtr pDifr,
     pSurfaceEvo->difrLastPrefetchPass = pDifr->prefetchPass;
 
     /* Collect copy parameters and do the prefetch. */
-    params.surfGpuAddress = pSurfaceEvo->gpuAddress;
+    params.surfGpuAddress = nvHsGetSurfaceGpuAddress(pDifr->pDevEvo, pSurfaceEvo);
     params.surfSizeBytes = pSurfaceEvo->planes[0].rmObjectSizeInBytes;
     params.surfPitchBytes = pSurfaceEvo->planes[0].pitch;
     params.surfFormat = pSurfaceEvo->format;

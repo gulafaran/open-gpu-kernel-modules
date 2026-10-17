@@ -188,6 +188,37 @@ NvU64 nvHsMapSurfaceToDevice(
     }
 }
 
+/*!
+ * Return the surface's address in the NVKMS GPU VA space, mapping it first if
+ * nvEvoRegisterSurface() deferred the mapping (lazy_gpu_map).
+ */
+NvU64 nvHsGetSurfaceGpuAddress(
+    const NVDevEvoRec *pDevEvo,
+    const NVSurfaceEvoRec *pConstSurfaceEvo)
+{
+    /* Callers have const pointers; the surface itself isn't const. */
+    NVSurfaceEvoRec *pSurfaceEvo = (NVSurfaceEvoRec *)pConstSurfaceEvo;
+
+    if (pSurfaceEvo->gpuMapPending) {
+        NvU64 gpuAddress =
+            nvHsMapSurfaceToDevice(pDevEvo,
+                                   pSurfaceEvo->planes[0].rmHandle,
+                                   pSurfaceEvo->planes[0].rmObjectSizeInBytes,
+                                   pSurfaceEvo->gpuMapPermissions);
+
+        pSurfaceEvo->gpuMapPending = FALSE;
+        if (gpuAddress == NV_HS_BAD_GPU_ADDRESS) {
+            nvEvoLogDev(pDevEvo, EVO_LOG_ERROR,
+                        "Failed to map surface 0x%08x into the NVKMS GPU address space",
+                        pSurfaceEvo->planes[0].rmHandle);
+            gpuAddress = 0;
+        }
+        pSurfaceEvo->gpuAddress = gpuAddress;
+    }
+
+    return pSurfaceEvo->gpuAddress;
+}
+
 void nvHsUnmapSurfaceFromDevice(
     const NVDevEvoRec *pDevEvo,
     const NvU32 rmHandle,
