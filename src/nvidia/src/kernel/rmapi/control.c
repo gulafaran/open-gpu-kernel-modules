@@ -42,6 +42,7 @@
 #include "ctrl/ctrl0000/ctrl0000gpuacct.h" // NV0000_CTRL_CMD_GPUACCT_*
 #include "ctrl/ctrl2080/ctrl2080tmr.h" // NV2080_CTRL_CMD_TIMER_SCHEDULE
 #include "ctrl/ctrl2080/ctrl2080fb.h" // NV2080_CTRL_CMD_FB_GET_MEM_ALIGNMENT
+#include "os-interface.h" // os_lockless_ctrl_no_power_ref
 
 static NV_STATUS
 releaseDeferRmCtrlBuffer(RmCtrlDeferredCmd* pRmCtrlDeferredCmd)
@@ -595,10 +596,25 @@ _rmapiRmControl(NvHandle hClient, NvHandle hObject, NvU32 cmd, NvP64 pUserParams
             }
         }
 
+        //
+        // With dynamic power management, rmapiPrologue() and rmapiEpilogue()
+        // take the API lock (READ) to reference/unreference the GPUs, so even
+        // a NO_API_LOCK control waits for every API lock writer (e.g. another
+        // process freeing a device, tens of ms). The only NO_API_LOCK control,
+        // the semaphore surface REGISTER_WAITER, works on sysmem semaphores and
+        // CPU-side waiter lists and doesn't need the GPU awake: skip the
+        // reference for it.
+        //
+        const NvBool bSkipGpuAccessRef = (getCtrlInfoStatus == NV_OK) &&
+                                         ((ctrlFlags & RMCTRL_FLAGS_NO_API_LOCK) != 0) &&
+                                         os_lockless_ctrl_no_power_ref();
         RM_API_CONTEXT rmApiContext = {0};
-        rmStatus = rmapiPrologue(pRmApi, &rmApiContext);
-        if (rmStatus != NV_OK)
-            goto epilogue;
+        if (!bSkipGpuAccessRef)
+        {
+            rmStatus = rmapiPrologue(pRmApi, &rmApiContext);
+            if (rmStatus != NV_OK)
+                goto epilogue;
+        }
 
         //
         // If this is an internal request within the same RM instance, make
@@ -634,7 +650,8 @@ _rmapiRmControl(NvHandle hClient, NvHandle hObject, NvU32 cmd, NvP64 pUserParams
         rmStatus = serverControl(&g_resServ, &rmCtrlParams);
 
 epilogue:
-        rmapiEpilogue(pRmApi, &rmApiContext);
+        if (!bSkipGpuAccessRef)
+            rmapiEpilogue(pRmApi, &rmApiContext);
     }
 done:
 

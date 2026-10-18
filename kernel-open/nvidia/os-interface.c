@@ -1523,6 +1523,17 @@ NvBool NV_API_CALL os_is_vgx_hyper(void)
 #endif
 }
 
+static bool lockless_ctrl_no_power_ref = true;
+module_param(lockless_ctrl_no_power_ref, bool, 0644);
+MODULE_PARM_DESC(lockless_ctrl_no_power_ref,
+                 "Don't take the dynamic power management GPU reference (and with it the RM API lock) "
+                 "around RM controls flagged NO_API_LOCK (semaphore surface REGISTER_WAITER).");
+
+NvBool NV_API_CALL os_lockless_ctrl_no_power_ref(void)
+{
+    return READ_ONCE(lockless_ctrl_no_power_ref);
+}
+
 NV_STATUS NV_API_CALL os_inject_vgx_msi(NvU16 guestID, NvU64 msiAddr, NvU32 msiData)
 {
 #if defined(NV_VGX_HYPER) && defined(NV_DOM0_KERNEL_PRESENT) && \
