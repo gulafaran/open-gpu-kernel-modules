@@ -123,6 +123,7 @@ NvBool nvkms_enhanced_pcon_support(void);
 NvBool nvkms_lazy_ctxdma_bind(void);
 NvBool nvkms_lazy_gpu_map(void);
 NvBool nvkms_unlocked_surface_rm(void);
+NvBool nvkms_batch_kapi_events(void);
 NvBool nvkms_output_rounding_fix(void);
 NvBool nvkms_disable_hdmi_frl(void);
 NvBool nvkms_disable_vrr_memclk_switch(void);

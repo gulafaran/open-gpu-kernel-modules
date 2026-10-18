@@ -149,6 +149,12 @@ MODULE_PARM_DESC(unlocked_backlight,
 static bool unlocked_backlight = true;
 module_param_named(unlocked_backlight, unlocked_backlight, bool, 0644);
 
+MODULE_PARM_DESC(batch_kapi_events,
+                 "Fetch NVKMS events (e.g. flip completions) for nvidia-drm in batches, "
+                 "taking the global NVKMS lock once per batch instead of once per event plus once more.");
+static bool batch_kapi_events = true;
+module_param_named(batch_kapi_events, batch_kapi_events, bool, 0644);
+
 MODULE_PARM_DESC(enhanced_pcon_support,
                  "Enable enhanced display protocol converter features (e.g. VRR over active DP-HDMI converters)");
 static bool enhanced_pcon_support = false;
@@ -268,6 +274,11 @@ NvBool nvkms_lazy_gpu_map(void)
 NvBool nvkms_unlocked_surface_rm(void)
 {
     return READ_ONCE(unlocked_surface_rm);
+}
+
+NvBool nvkms_batch_kapi_events(void)
+{
+    return READ_ONCE(batch_kapi_events);
 }
 
 NvBool nvkms_output_rounding_fix(void)
