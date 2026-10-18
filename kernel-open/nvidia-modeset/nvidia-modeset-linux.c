@@ -136,6 +136,13 @@ MODULE_PARM_DESC(lazy_gpu_map,
 static bool lazy_gpu_map = true;
 module_param_named(lazy_gpu_map, lazy_gpu_map, bool, 0644);
 
+MODULE_PARM_DESC(unlocked_surface_rm,
+                 "Make the RM calls of DRM framebuffer creation/destruction (NVKMS surface registration) "
+                 "without holding the global NVKMS lock, so they don't stall vblank and flip handling while "
+                 "they wait for RM.");
+static bool unlocked_surface_rm = true;
+module_param_named(unlocked_surface_rm, unlocked_surface_rm, bool, 0644);
+
 MODULE_PARM_DESC(enhanced_pcon_support,
                  "Enable enhanced display protocol converter features (e.g. VRR over active DP-HDMI converters)");
 static bool enhanced_pcon_support = false;
@@ -250,6 +257,11 @@ NvBool nvkms_lazy_ctxdma_bind(void)
 NvBool nvkms_lazy_gpu_map(void)
 {
     return READ_ONCE(lazy_gpu_map);
+}
+
+NvBool nvkms_unlocked_surface_rm(void)
+{
+    return READ_ONCE(unlocked_surface_rm);
 }
 
 NvBool nvkms_output_rounding_fix(void)
@@ -1678,6 +1690,16 @@ NvBool nvkms_ioctl_from_kapi
 /*************************************************************************
  * APIs for locking.
  *************************************************************************/
+
+void nvkms_drop_global_lock(void)
+{
+    up(&nvkms_lock);
+}
+
+void nvkms_retake_global_lock(void)
+{
+    down(&nvkms_lock);
+}
 
 struct nvkms_sema_t {
     struct semaphore os_sema;

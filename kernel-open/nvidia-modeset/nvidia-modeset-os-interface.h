@@ -122,6 +122,7 @@ NvBool nvkms_conceal_vrr_caps(void);
 NvBool nvkms_enhanced_pcon_support(void);
 NvBool nvkms_lazy_ctxdma_bind(void);
 NvBool nvkms_lazy_gpu_map(void);
+NvBool nvkms_unlocked_surface_rm(void);
 NvBool nvkms_output_rounding_fix(void);
 NvBool nvkms_disable_hdmi_frl(void);
 NvBool nvkms_disable_vrr_memclk_switch(void);
@@ -374,6 +375,14 @@ NvBool nvkms_ioctl_from_kapi_try_pmlock
 /*!
  * APIs for locking.
  */
+
+/*
+ * Temporarily release the global NVKMS lock around RM calls that don't touch
+ * NVKMS state. Only valid in an ioctl from a kernel-space (KAPI) client, which
+ * also holds the NVKMS PM lock, so suspend can't run in between.
+ */
+void nvkms_drop_global_lock(void);
+void nvkms_retake_global_lock(void);
 
 typedef struct nvkms_sema_t nvkms_sema_handle_t;
 
