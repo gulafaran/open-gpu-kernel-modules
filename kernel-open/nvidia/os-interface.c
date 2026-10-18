@@ -1534,6 +1534,17 @@ NvBool NV_API_CALL os_lockless_ctrl_no_power_ref(void)
     return READ_ONCE(lockless_ctrl_no_power_ref);
 }
 
+static bool readonly_get_surface_info = true;
+module_param(readonly_get_surface_info, bool, 0644);
+MODULE_PARM_DESC(readonly_get_surface_info,
+                 "Take the RM API lock for read instead of write for NV0041_CTRL_CMD_GET_SURFACE_INFO "
+                 "(a read-only query nvidia-modeset makes when registering a framebuffer).");
+
+NvBool NV_API_CALL os_readonly_get_surface_info(void)
+{
+    return READ_ONCE(readonly_get_surface_info);
+}
+
 NV_STATUS NV_API_CALL os_inject_vgx_msi(NvU16 guestID, NvU64 msiAddr, NvU32 msiData)
 {
 #if defined(NV_VGX_HYPER) && defined(NV_DOM0_KERNEL_PRESENT) && \
