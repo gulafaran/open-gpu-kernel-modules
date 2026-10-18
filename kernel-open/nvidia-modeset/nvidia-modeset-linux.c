@@ -143,6 +143,12 @@ MODULE_PARM_DESC(unlocked_surface_rm,
 static bool unlocked_surface_rm = true;
 module_param_named(unlocked_surface_rm, unlocked_surface_rm, bool, 0644);
 
+MODULE_PARM_DESC(unlocked_backlight,
+                 "Read and set the backlight brightness without holding the global NVKMS lock "
+                 "(each is a GSP RPC).");
+static bool unlocked_backlight = true;
+module_param_named(unlocked_backlight, unlocked_backlight, bool, 0644);
+
 MODULE_PARM_DESC(enhanced_pcon_support,
                  "Enable enhanced display protocol converter features (e.g. VRR over active DP-HDMI converters)");
 static bool enhanced_pcon_support = false;
@@ -1331,19 +1337,34 @@ struct nvkms_backlight_device {
 static int nvkms_update_backlight_status(struct backlight_device *bd)
 {
     struct nvkms_backlight_device *nvkms_bd = bl_get_data(bd);
+    const bool unlocked = READ_ONCE(unlocked_backlight);
     NvBool status;
     int ret;
 
-    ret = down_interruptible(&nvkms_lock);
+    /*
+     * nvKmsSetBacklight() and nvKmsGetBacklight() only make an RM control
+     * call on the display's RM objects and don't touch NVKMS state, so with
+     * unlocked_backlight they run without nvkms_lock (the RM call is a GSP
+     * RPC that can take milliseconds). The backlight core calls them with
+     * bd->ops_lock held, and nvkms_unregister_backlight() takes ops_lock
+     * before NVKMS frees the display, which keeps drv_priv valid here.
+     * Taking nvkms_lock here can also deadlock against
+     * nvkms_unregister_backlight(), which runs with nvkms_lock held.
+     */
+    if (!unlocked) {
+        ret = down_interruptible(&nvkms_lock);
 
-    if (ret != 0) {
-        return ret;
+        if (ret != 0) {
+            return ret;
+        }
     }
 
     status = nvKmsSetBacklight(nvkms_bd->display_id, nvkms_bd->drv_priv,
                                bd->props.brightness);
 
-    up(&nvkms_lock);
+    if (!unlocked) {
+        up(&nvkms_lock);
+    }
 
     return status ? 0 : -EINVAL;
 }
@@ -1351,20 +1372,26 @@ static int nvkms_update_backlight_status(struct backlight_device *bd)
 static int nvkms_get_backlight_brightness(struct backlight_device *bd)
 {
     struct nvkms_backlight_device *nvkms_bd = bl_get_data(bd);
+    const bool unlocked = READ_ONCE(unlocked_backlight);
     NvU32 brightness = 0;
     NvBool status;
     int ret;
 
-    ret = down_interruptible(&nvkms_lock);
+    /* See nvkms_update_backlight_status(). */
+    if (!unlocked) {
+        ret = down_interruptible(&nvkms_lock);
 
-    if (ret != 0) {
-        return ret;
+        if (ret != 0) {
+            return ret;
+        }
     }
 
     status = nvKmsGetBacklight(nvkms_bd->display_id, nvkms_bd->drv_priv,
                                &brightness);
 
-    up(&nvkms_lock);
+    if (!unlocked) {
+        up(&nvkms_lock);
+    }
 
     return  status ? brightness : -1;
 }
