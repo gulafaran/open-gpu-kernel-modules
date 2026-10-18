@@ -30,6 +30,7 @@
 #include "resserv/rs_client.h"
 #include "vgpu/rpc.h"
 #include "ctrl/ctrl2080/ctrl2080perf.h"
+#include "os-interface.h" // os_async_perf_boost
 
 /* ------------------------ Global Variables ------------------------------- */
 /* ------------------------ Static Function Prototypes --------------------- */
@@ -111,6 +112,24 @@ kperfBoostSet_IMPL
 
     boostParams2x.flags    = pBoostParams->flags;
     boostParams2x.duration = pBoostParams->duration;
+
+    //
+    // A synchronous boost makes GSP-RM wait for the P-state change before the
+    // RPC returns (25-36 ms from P5), with this client's API lock (read) and
+    // the GPU lock held, so every other client's RM call that needs either
+    // stalls behind it -- the compositor's, when an OpenGL app starts and
+    // boosts at context creation. The boost is only a hint for the caller, so
+    // request it asynchronously: GSP-RM applies it right after the RPC.
+    // CUDA boosts (refcounted, paired with the CUDA limit) and clears are
+    // passed through unchanged.
+    //
+    if (os_async_perf_boost() &&
+        !FLD_TEST_DRF(2080, _CTRL_PERF_BOOST_FLAGS, _CMD, _CLEAR, boostParams2x.flags) &&
+        FLD_TEST_DRF(2080, _CTRL_PERF_BOOST_FLAGS, _CUDA, _NO, boostParams2x.flags))
+    {
+        boostParams2x.flags = FLD_SET_DRF(2080, _CTRL_PERF_BOOST_FLAGS, _ASYNC, _YES,
+                                          boostParams2x.flags);
+    }
 
     status = pRmApi->Control(pRmApi,
                              RES_GET_CLIENT_HANDLE(pSubdevice),

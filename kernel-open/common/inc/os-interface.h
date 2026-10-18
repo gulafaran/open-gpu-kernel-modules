@@ -171,6 +171,7 @@ NvBool      NV_API_CALL  os_is_xen_dom0                   (void);
 NvBool      NV_API_CALL  os_is_vgx_hyper                  (void);
 NvBool      NV_API_CALL  os_lockless_ctrl_no_power_ref    (void);
 NvBool      NV_API_CALL  os_readonly_get_surface_info     (void);
+NvBool      NV_API_CALL  os_async_perf_boost              (void);
 NV_STATUS   NV_API_CALL  os_inject_vgx_msi                (NvU16, NvU64, NvU32);
 NvBool      NV_API_CALL  os_is_grid_supported             (void);
 NvU32       NV_API_CALL  os_get_grid_csp_support          (void);

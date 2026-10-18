@@ -1545,6 +1545,17 @@ NvBool NV_API_CALL os_readonly_get_surface_info(void)
     return READ_ONCE(readonly_get_surface_info);
 }
 
+static bool async_perf_boost = true;
+module_param(async_perf_boost, bool, 0644);
+MODULE_PARM_DESC(async_perf_boost,
+                 "Request non-CUDA NV2080_CTRL_CMD_PERF_BOOST boosts asynchronously, so the "
+                 "control returns without waiting for the P-state change (with the GPU lock held).");
+
+NvBool NV_API_CALL os_async_perf_boost(void)
+{
+    return READ_ONCE(async_perf_boost);
+}
+
 NV_STATUS NV_API_CALL os_inject_vgx_msi(NvU16 guestID, NvU64 msiAddr, NvU32 msiData)
 {
 #if defined(NV_VGX_HYPER) && defined(NV_DOM0_KERNEL_PRESENT) && \
