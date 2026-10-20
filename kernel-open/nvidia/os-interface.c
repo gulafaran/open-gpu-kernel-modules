@@ -1559,9 +1559,10 @@ NvBool NV_API_CALL os_async_perf_boost(void)
 static bool clear_rg_sem_skipped = true;
 module_param(clear_rg_sem_skipped, bool, 0644);
 MODULE_PARM_DESC(clear_rg_sem_skipped,
-                 "Clear the display RG_SEM_SKIPPED error event from the CPU on RG semaphore "
-                 "interrupts. GSP-RM never clears it, so its interrupt stays pending and keeps "
-                 "the GSP busy (and the GPU clocks at max) until the next suspend/resume.");
+                 "Clear the display RG_SEM_SKIPPED error event from the CPU on display "
+                 "interrupts and once a second. GSP-RM never clears it, so its interrupt stays "
+                 "pending and keeps the GSP busy (and the GPU clocks at max) until the next "
+                 "suspend/resume.");
 
 static atomic_t rg_sem_skipped_count = ATOMIC_INIT(0);
 
@@ -1570,12 +1571,13 @@ NvBool NV_API_CALL os_clear_rg_sem_skipped(void)
     return READ_ONCE(clear_rg_sem_skipped);
 }
 
-void NV_API_CALL os_log_rg_sem_skipped(NvU32 headMask)
+void NV_API_CALL os_log_rg_sem_skipped(NvU32 headMask, NvBool bPeriodic)
 {
     int count = atomic_inc_return(&rg_sem_skipped_count);
 
     printk_ratelimited(KERN_INFO "NVRM: cleared display RG_SEM_SKIPPED error "
-                       "(head mask 0x%x, %d since load)\n", headMask, count);
+                       "(head mask 0x%x, %s, %d since load)\n", headMask,
+                       bPeriodic ? "periodic check" : "display interrupt", count);
 }
 
 NV_STATUS NV_API_CALL os_inject_vgx_msi(NvU16 guestID, NvU64 msiAddr, NvU32 msiData)
