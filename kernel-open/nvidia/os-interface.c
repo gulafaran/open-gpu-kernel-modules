@@ -1631,6 +1631,17 @@ NvBool NV_API_CALL os_isr_single_nonstall_scan(void)
     return READ_ONCE(isr_single_nonstall_scan);
 }
 
+static bool kernel_user_map_bar1_contig = true;
+module_param(kernel_user_map_bar1_contig, bool, 0644);
+MODULE_PARM_DESC(kernel_user_map_bar1_contig,
+                 "Require a single contiguous BAR1 range for user-space-type CPU mappings "
+                 "made by kernel clients (nvidia-drm), which use only the first range.");
+
+NvBool NV_API_CALL os_kernel_user_map_bar1_contig(void)
+{
+    return READ_ONCE(kernel_user_map_bar1_contig);
+}
+
 NV_STATUS NV_API_CALL os_get_euid(NvU32 *pSecToken)
 {
     *pSecToken = NV_CURRENT_EUID();
