@@ -1620,6 +1620,17 @@ void NV_API_CALL os_bug_check(NvU32 bugCode, const char *bugCodeStr)
     panic(bugCodeStr);
 }
 
+static bool isr_single_nonstall_scan = true;
+module_param(isr_single_nonstall_scan, bool, 0644);
+MODULE_PARM_DESC(isr_single_nonstall_scan,
+                 "Scan the non-stall interrupt tree once per interrupt (while servicing it) "
+                 "instead of a separate pending scan first, when no ctxsw log consumer exists.");
+
+NvBool NV_API_CALL os_isr_single_nonstall_scan(void)
+{
+    return READ_ONCE(isr_single_nonstall_scan);
+}
+
 NV_STATUS NV_API_CALL os_get_euid(NvU32 *pSecToken)
 {
     *pSecToken = NV_CURRENT_EUID();
