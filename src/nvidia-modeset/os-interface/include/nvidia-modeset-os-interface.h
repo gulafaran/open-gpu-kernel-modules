@@ -133,6 +133,7 @@ NvBool nvkms_opportunistic_display_sync(void);
 enum NvKmsDebugForceColorSpace nvkms_debug_force_color_space(void);
 NvBool nvkms_enable_overlay_layers(void);
 NvBool nvkms_debug_logging(void);
+NvBool nvkms_dp_sst_edid_recovery_fix(void);
 void nvkms_extcon_report_hdmi(NvBool state);
 void nvkms_extcon_report_hdmi_audio(NvBool state);
 

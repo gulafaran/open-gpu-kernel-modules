@@ -160,6 +160,13 @@ MODULE_PARM_DESC(enhanced_pcon_support,
 static bool enhanced_pcon_support = false;
 module_param_named(enhanced_pcon_support, enhanced_pcon_support, bool, 0444);
 
+MODULE_PARM_DESC(dp_sst_edid_recovery_fix,
+                 "Default for the DP_ENABLE_SST_EDID_RECOVERY_FIX DisplayPort regkey: re-read a "
+                 "single-stream (e.g. eDP) EDID after a corrupted block instead of reporting a "
+                 "fallback EDID. Read once when the first DisplayPort connector is set up.");
+static bool dp_sst_edid_recovery_fix = true;
+module_param_named(dp_sst_edid_recovery_fix, dp_sst_edid_recovery_fix, bool, 0444);
+
 /* Fail allocating the RM core channel for NVKMS using the i-th method (see
  * FailAllocCoreChannelMethod). Failures not using the i-th method are ignored. */
 MODULE_PARM_DESC(fail_alloc_core_channel, "Control testing for hardware core channel allocation failure");
@@ -249,6 +256,11 @@ enum NvKmsFrlRateForce nvkms_force_frl_rate(void)
     }
 
     return NVKMS_FRL_RATE_FORCE_NONE;
+}
+
+NvBool nvkms_dp_sst_edid_recovery_fix(void)
+{
+    return dp_sst_edid_recovery_fix;
 }
 
 NvBool nvkms_conceal_vrr_caps(void)
