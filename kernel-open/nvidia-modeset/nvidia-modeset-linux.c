@@ -167,6 +167,13 @@ MODULE_PARM_DESC(dp_sst_edid_recovery_fix,
 static bool dp_sst_edid_recovery_fix = true;
 module_param_named(dp_sst_edid_recovery_fix, dp_sst_edid_recovery_fix, bool, 0444);
 
+MODULE_PARM_DESC(kapi_sysmem_semaphores,
+                 "Keep the nvidia-drm display semaphores (used for plane in-fences) in system memory "
+                 "instead of video memory, so the CPU check on every fenced commit doesn't read video "
+                 "memory over PCIe. Read when the GPU is set up for nvidia-drm.");
+static bool kapi_sysmem_semaphores = true;
+module_param_named(kapi_sysmem_semaphores, kapi_sysmem_semaphores, bool, 0444);
+
 /* Fail allocating the RM core channel for NVKMS using the i-th method (see
  * FailAllocCoreChannelMethod). Failures not using the i-th method are ignored. */
 MODULE_PARM_DESC(fail_alloc_core_channel, "Control testing for hardware core channel allocation failure");
@@ -261,6 +268,11 @@ enum NvKmsFrlRateForce nvkms_force_frl_rate(void)
 NvBool nvkms_dp_sst_edid_recovery_fix(void)
 {
     return dp_sst_edid_recovery_fix;
+}
+
+NvBool nvkms_kapi_sysmem_semaphores(void)
+{
+    return kapi_sysmem_semaphores;
 }
 
 NvBool nvkms_conceal_vrr_caps(void)
