@@ -136,6 +136,7 @@ NvBool nvkms_debug_logging(void);
 NvBool nvkms_dp_sst_edid_recovery_fix(void);
 NvBool nvkms_kapi_sysmem_semaphores(void);
 NvBool nvkms_pushbuf_wrap_no_yield(void);
+NvBool nvkms_nonstall_skip_idle(void);
 void nvkms_extcon_report_hdmi(NvBool state);
 void nvkms_extcon_report_hdmi_audio(NvBool state);
 

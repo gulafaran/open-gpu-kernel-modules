@@ -180,6 +180,12 @@ MODULE_PARM_DESC(pushbuf_wrap_no_yield,
 static bool pushbuf_wrap_no_yield = true;
 module_param_named(pushbuf_wrap_no_yield, pushbuf_wrap_no_yield, bool, 0644);
 
+MODULE_PARM_DESC(nonstall_skip_idle,
+                 "Don't wake the NVKMS worker (and take the NVKMS lock) for GPU non-stall interrupts "
+                 "when no deferred request FIFO or headSurface channel exists to service.");
+static bool nonstall_skip_idle = true;
+module_param_named(nonstall_skip_idle, nonstall_skip_idle, bool, 0644);
+
 /* Fail allocating the RM core channel for NVKMS using the i-th method (see
  * FailAllocCoreChannelMethod). Failures not using the i-th method are ignored. */
 MODULE_PARM_DESC(fail_alloc_core_channel, "Control testing for hardware core channel allocation failure");
@@ -284,6 +290,11 @@ NvBool nvkms_kapi_sysmem_semaphores(void)
 NvBool nvkms_pushbuf_wrap_no_yield(void)
 {
     return READ_ONCE(pushbuf_wrap_no_yield);
+}
+
+NvBool nvkms_nonstall_skip_idle(void)
+{
+    return READ_ONCE(nonstall_skip_idle);
 }
 
 NvBool nvkms_conceal_vrr_caps(void)
