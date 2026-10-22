@@ -174,6 +174,12 @@ MODULE_PARM_DESC(kapi_sysmem_semaphores,
 static bool kapi_sysmem_semaphores = true;
 module_param_named(kapi_sysmem_semaphores, kapi_sysmem_semaphores, bool, 0444);
 
+MODULE_PARM_DESC(pushbuf_wrap_no_yield,
+                 "When a display channel push buffer wraps around, check for room again right away "
+                 "instead of yielding the CPU first (with the NVKMS lock held).");
+static bool pushbuf_wrap_no_yield = true;
+module_param_named(pushbuf_wrap_no_yield, pushbuf_wrap_no_yield, bool, 0644);
+
 /* Fail allocating the RM core channel for NVKMS using the i-th method (see
  * FailAllocCoreChannelMethod). Failures not using the i-th method are ignored. */
 MODULE_PARM_DESC(fail_alloc_core_channel, "Control testing for hardware core channel allocation failure");
@@ -273,6 +279,11 @@ NvBool nvkms_dp_sst_edid_recovery_fix(void)
 NvBool nvkms_kapi_sysmem_semaphores(void)
 {
     return kapi_sysmem_semaphores;
+}
+
+NvBool nvkms_pushbuf_wrap_no_yield(void)
+{
+    return READ_ONCE(pushbuf_wrap_no_yield);
 }
 
 NvBool nvkms_conceal_vrr_caps(void)
