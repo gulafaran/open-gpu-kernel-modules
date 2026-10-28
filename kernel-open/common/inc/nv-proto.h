@@ -44,6 +44,11 @@ void        nv_hwmon_init               (nv_linux_state_t *);
 void        nv_hwmon_start              (nv_linux_state_t *);
 void        nv_hwmon_stop               (nv_linux_state_t *, nvidia_stack_t *);
 
+struct seq_file;
+void        nv_fdinfo_file_init         (nv_linux_file_private_t *);
+void        nv_fdinfo_file_free         (nv_linux_file_private_t *);
+void        nv_fdinfo_show              (struct seq_file *, nv_linux_file_private_t *);
+
 extern nv_pm_action_depth_t nv_procfs_pm_action_depth;
 
 int         nvidia_mmap                 (struct file *, struct vm_area_struct *);

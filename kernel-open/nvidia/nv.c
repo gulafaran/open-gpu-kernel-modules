@@ -269,6 +269,7 @@ static int           nvidia_close          (struct inode *, struct file *);
 static unsigned int  nvidia_poll           (struct file *, poll_table *);
 static int           nvidia_ioctl          (struct inode *, struct file *, unsigned int, unsigned long);
 static long          nvidia_unlocked_ioctl (struct file *, unsigned int, unsigned long);
+static void          nvidia_show_fdinfo    (struct seq_file *, struct file *);
 
 /* character device entry points*/
 static struct file_operations nvidia_fops = {
@@ -281,6 +282,7 @@ static struct file_operations nvidia_fops = {
     .mmap      = nvidia_mmap,
     .open      = nvidia_open,
     .release   = nvidia_close,
+    .show_fdinfo = nvidia_show_fdinfo,
 };
 
 #if defined(CONFIG_PM)
@@ -1226,6 +1228,8 @@ static void *nv_alloc_file_private(void)
     init_rwsem(&nvlfp->fileVaLock);
     nvlfp->file_mapping_list = NULL;
 
+    nv_fdinfo_file_init(nvlfp);
+
     return nvlfp;
 }
 
@@ -1256,6 +1260,8 @@ static void nv_free_file_private(nv_linux_file_private_t *nvlfp)
         }
         os_free_mem(pNode);
     }
+
+    nv_fdinfo_file_free(nvlfp);
 
     NV_KFREE(nvlfp, sizeof(nv_linux_file_private_t));
 }
@@ -2576,6 +2582,22 @@ nvidia_close(
     }
 
     return 0;
+}
+
+static void
+nvidia_show_fdinfo(
+    struct seq_file *m,
+    struct file *file
+)
+{
+    nv_linux_file_private_t *nvlfp = NV_GET_LINUX_FILE_PRIVATE(file);
+
+    if ((nvlfp == NULL) || nv_is_control_device(NV_FILE_INODE(file)))
+    {
+        return;
+    }
+
+    nv_fdinfo_show(m, nvlfp);
 }
 
 unsigned int
