@@ -1293,6 +1293,13 @@ typedef struct nv_hwmon_s
     unsigned long retry_jiffies;
 } nv_hwmon_t;
 
+/* fdinfo engine sampling state, protected by the global lock in nv-fdinfo.c */
+typedef struct nv_fdinfo_s
+{
+    NvU64 last_timestamp;           /* newest GSP sample already accounted */
+    unsigned long refresh_jiffies;  /* don't fetch samples again before this */
+} nv_fdinfo_t;
+
 typedef struct nv_linux_state_s {
     nv_state_t nv_state;
 
@@ -1495,6 +1502,7 @@ typedef struct nv_linux_state_s {
     NvBool init_on_probe;
 
     nv_hwmon_t hwmon;
+    nv_fdinfo_t fdinfo;
 } nv_linux_state_t;
 
 extern nv_linux_state_t *nv_linux_devices;
@@ -1567,6 +1575,10 @@ typedef struct
     NV_STATUS adapter_status;
 
     struct list_head entry;
+
+    /* fdinfo usage stats, see nv-fdinfo.c */
+    struct pid *fdinfo_pid;                         /* thread group that opened the file */
+    struct nv_fdinfo_client_s *fdinfo_client;       /* NULL until the fdinfo is first read */
 } nv_linux_file_private_t;
 
 static inline nv_linux_file_private_t *nv_get_nvlfp_from_nvfp(nv_file_private_t *nvfp)

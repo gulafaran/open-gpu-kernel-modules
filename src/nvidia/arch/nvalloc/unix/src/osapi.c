@@ -65,6 +65,7 @@
 #include "nv-firmware-registry.h"
 #include "core/hal_mgr.h"
 #include "gpu/device/device.h"
+#include "gpu/mig_mgr/kernel_mig_manager.h"
 
 #include "resserv/rs_server.h"
 #include "resserv/rs_client.h"
@@ -81,6 +82,7 @@
 #include "ctrl/ctrl2080/ctrl2080fb.h"
 #include "ctrl/ctrl2080/ctrl2080perf.h"
 #include "ctrl/ctrl2080/ctrl2080gpu.h"
+#include "ctrl/ctrl2080/ctrl2080gpumon.h"
 #include "ctrl/ctrl402c.h"
 
 #include "g_nv_name_released.h"   // released chip entries from nvChipAutoFlags.h
@@ -4862,6 +4864,198 @@ void NV_API_CALL rm_hwmon_read(
 
 done:
     NV_EXIT_RM_RUNTIME(sp,fp);
+}
+
+static void
+RmFdinfoCopyEngineSample
+(
+    nv_fdinfo_util_sample_t *pSample,
+    nv_fdinfo_engine_t engine,
+    const NV2080_CTRL_PERF_GPUMON_ENGINE_UTIL_SAMPLE *pEngine
+)
+{
+    pSample->util[engine] = pEngine->util;
+    pSample->pid[engine] = (pEngine->procId == NV2080_GPUMON_PID_INVALID) ?
+                           NV_FDINFO_PID_INVALID : pEngine->procId;
+}
+
+//
+// Copy out the GSP perfmon utilization samples (NV_FDINFO_UTIL_SAMPLE_COUNT,
+// unordered, with the active process per engine) for fdinfo. Fails without
+// touching the GPU if it is not at full power.
+//
+NV_STATUS NV_API_CALL rm_fdinfo_get_util_samples(
+    nvidia_stack_t          *sp,
+    nv_state_t              *pNv,
+    nv_fdinfo_util_sample_t *pSamples
+)
+{
+    THREAD_STATE_NODE threadState;
+    void              *fp;
+    GPU_MASK          gpuMask;
+    NV_STATUS         status;
+    NV2080_CTRL_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2_PARAMS *pParams;
+    NvU32             i;
+
+    ct_assert(NV_FDINFO_UTIL_SAMPLE_COUNT == NV2080_CTRL_PERF_GPUMON_SAMPLE_COUNT_PERFMON_UTIL);
+
+    NV_ENTER_RM_RUNTIME(sp,fp);
+    threadStateInit(&threadState, THREAD_STATE_FLAGS_NONE);
+
+    pParams = portMemAllocNonPaged(sizeof(*pParams));
+    if (pParams == NULL)
+    {
+        status = NV_ERR_NO_MEMORY;
+        goto done;
+    }
+
+    // LOCK: acquire API lock (read: only the GPU lock is needed for the RPC)
+    status = rmapiLockAcquire(RMAPI_LOCK_FLAGS_READ, RM_LOCK_MODULES_OSAPI);
+    if (status == NV_OK)
+    {
+        OBJGPU *pGpu = NV_GET_NV_PRIV_PGPU(pNv);
+
+        // LOCK: acquire per device lock
+        if (pGpu == NULL)
+        {
+            status = NV_ERR_INVALID_STATE;
+        }
+        else if ((status = rmGpuGroupLockAcquire(pGpu->gpuInstance, GPU_LOCK_GRP_SUBDEVICE,
+                                                 GPUS_LOCK_FLAGS_NONE, RM_LOCK_MODULES_OSAPI,
+                                                 &gpuMask)) == NV_OK)
+        {
+            if (!FULL_GPU_SANITY_CHECK(pGpu) ||
+                !pGpu->getProperty(pGpu, PDB_PROP_GPU_STATE_INITIALIZED))
+            {
+                status = NV_ERR_GPU_NOT_FULL_POWER;
+            }
+            else if (IS_MIG_ENABLED(pGpu))
+            {
+                status = NV_ERR_NOT_SUPPORTED;
+            }
+            else
+            {
+                RM_API *pRmApi = GPU_GET_PHYSICAL_RMAPI(pGpu);
+
+                portMemSet(pParams, 0, sizeof(*pParams));
+                pParams->type = NV2080_CTRL_GPUMON_SAMPLE_TYPE_PERFMON_UTIL;
+                pParams->bufSize = sizeof(pParams->samples);
+
+                status = pRmApi->Control(pRmApi,
+                                         pGpu->hInternalClient,
+                                         pGpu->hInternalSubdevice,
+                                         NV2080_CTRL_CMD_PERF_GET_GPUMON_PERFMON_UTIL_SAMPLES_V2,
+                                         pParams,
+                                         sizeof(*pParams));
+            }
+
+            // UNLOCK: release per device lock
+            rmGpuGroupLockRelease(gpuMask, GPUS_LOCK_FLAGS_NONE);
+        }
+
+        // UNLOCK: release API lock
+        rmapiLockRelease();
+    }
+
+    if (status == NV_OK)
+    {
+        for (i = 0; i < NV_FDINFO_UTIL_SAMPLE_COUNT; i++)
+        {
+            const NV2080_CTRL_PERF_GPUMON_PERFMON_UTIL_SAMPLE *pSrc = &pParams->samples[i];
+
+            pSamples[i].timestamp = pSrc->base.timeStamp;
+            RmFdinfoCopyEngineSample(&pSamples[i], NV_FDINFO_ENGINE_GR, &pSrc->gr);
+            RmFdinfoCopyEngineSample(&pSamples[i], NV_FDINFO_ENGINE_NVENC, &pSrc->nvenc);
+            RmFdinfoCopyEngineSample(&pSamples[i], NV_FDINFO_ENGINE_NVDEC, &pSrc->nvdec);
+            RmFdinfoCopyEngineSample(&pSamples[i], NV_FDINFO_ENGINE_NVJPG, &pSrc->nvjpg);
+            RmFdinfoCopyEngineSample(&pSamples[i], NV_FDINFO_ENGINE_NVOFA, &pSrc->nvofa);
+        }
+    }
+
+    portMemFree(pParams);
+
+done:
+    threadStateFree(&threadState, THREAD_STATE_FLAGS_NONE);
+    NV_EXIT_RM_RUNTIME(sp,fp);
+
+    return status;
+}
+
+//
+// Video memory allocated by the clients of a process (pid in the caller's
+// namespace), as reported by NV2080_CTRL_CMD_GPU_GET_PID_INFO. Doesn't touch
+// the GPU.
+//
+NV_STATUS NV_API_CALL rm_fdinfo_get_vidmem(
+    nvidia_stack_t *sp,
+    nv_state_t     *pNv,
+    NvU32           pid,
+    NvU64          *pTotal,
+    NvU64          *pShared
+)
+{
+    THREAD_STATE_NODE threadState;
+    void              *fp;
+    GPU_MASK          gpuMask;
+    NV_STATUS         status;
+
+    NV_ENTER_RM_RUNTIME(sp,fp);
+    threadStateInit(&threadState, THREAD_STATE_FLAGS_NONE);
+
+    // LOCK: acquire API lock (write: walks the resources of all clients)
+    status = rmapiLockAcquire(API_LOCK_FLAGS_NONE, RM_LOCK_MODULES_OSAPI);
+    if (status == NV_OK)
+    {
+        OBJGPU *pGpu = NV_GET_NV_PRIV_PGPU(pNv);
+
+        // LOCK: acquire per device lock
+        if (pGpu == NULL)
+        {
+            status = NV_ERR_INVALID_STATE;
+        }
+        else if ((status = rmGpuGroupLockAcquire(pGpu->gpuInstance, GPU_LOCK_GRP_SUBDEVICE,
+                                                 GPUS_LOCK_FLAGS_NONE, RM_LOCK_MODULES_OSAPI,
+                                                 &gpuMask)) == NV_OK)
+        {
+            if (!pGpu->getProperty(pGpu, PDB_PROP_GPU_STATE_INITIALIZED))
+            {
+                status = NV_ERR_INVALID_STATE;
+            }
+            else if (IS_MIG_IN_USE(pGpu))
+            {
+                status = NV_ERR_NOT_SUPPORTED;
+            }
+            else
+            {
+                MIG_INSTANCE_REF ref = kmigmgrMakeNoMIGReference();
+                NV2080_CTRL_GPU_PID_INFO_DATA data;
+                NV2080_CTRL_SMC_SUBSCRIPTION_INFO smcInfo;
+
+                portMemSet(&data, 0, sizeof(data));
+
+                status = gpuFindClientInfoWithPidIterator(pGpu, pid, 0, classId(Memory),
+                                                          &data, &smcInfo, &ref, NV_TRUE);
+                if (status == NV_OK)
+                {
+                    NV2080_CTRL_GPU_PID_INFO_VIDEO_MEMORY_USAGE_DATA *pUsage = &data.vidMemUsage;
+
+                    *pShared = pUsage->memSharedOwned + pUsage->memSharedDuped;
+                    *pTotal = pUsage->memPrivate + *pShared;
+                }
+            }
+
+            // UNLOCK: release per device lock
+            rmGpuGroupLockRelease(gpuMask, GPUS_LOCK_FLAGS_NONE);
+        }
+
+        // UNLOCK: release API lock
+        rmapiLockRelease();
+    }
+
+    threadStateFree(&threadState, THREAD_STATE_FLAGS_NONE);
+    NV_EXIT_RM_RUNTIME(sp,fp);
+
+    return status;
 }
 
 NV_STATUS NV_API_CALL rm_p2p_dma_map_pages(

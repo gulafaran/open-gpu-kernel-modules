@@ -809,6 +809,30 @@ typedef struct
     NvS64 value;
 } nv_hwmon_reading_t;
 
+/*
+ * GPU monitoring utilization sample for fdinfo: the engine utilization over
+ * one sample period and the process that was active on the engine.
+ */
+typedef enum
+{
+    NV_FDINFO_ENGINE_GR = 0,
+    NV_FDINFO_ENGINE_NVENC,
+    NV_FDINFO_ENGINE_NVDEC,
+    NV_FDINFO_ENGINE_NVJPG,
+    NV_FDINFO_ENGINE_NVOFA,
+    NV_FDINFO_ENGINE_COUNT
+} nv_fdinfo_engine_t;
+
+#define NV_FDINFO_UTIL_SAMPLE_COUNT     72
+#define NV_FDINFO_PID_INVALID           ((NvU32)~0)
+
+typedef struct
+{
+    NvU64 timestamp;                        /* ns, 0 if the sample is unused */
+    NvU32 util[NV_FDINFO_ENGINE_COUNT];     /* percent * 100 */
+    NvU32 pid[NV_FDINFO_ENGINE_COUNT];      /* NV_FDINFO_PID_INVALID if idle */
+} nv_fdinfo_util_sample_t;
+
 typedef enum
 {
     NV_MEMORY_TYPE_SYSTEM,      /* Memory mapped for ROM, SBIOS and physical RAM. */
@@ -1323,6 +1347,8 @@ NV_STATUS  NV_API_CALL rm_transition_dynamic_power(nvidia_stack_t *, nv_state_t 
 void       NV_API_CALL rm_get_power_info(nvidia_stack_t *, nv_state_t *, nv_power_info_t *);
 NV_STATUS  NV_API_CALL rm_hwmon_set_polling(nvidia_stack_t *, nv_state_t *, NvBool, NvBool);
 void       NV_API_CALL rm_hwmon_read(nvidia_stack_t *, nv_state_t *, nv_hwmon_reading_t *);
+NV_STATUS  NV_API_CALL rm_fdinfo_get_util_samples(nvidia_stack_t *, nv_state_t *, nv_fdinfo_util_sample_t *);
+NV_STATUS  NV_API_CALL rm_fdinfo_get_vidmem(nvidia_stack_t *, nv_state_t *, NvU32, NvU64 *, NvU64 *);
 
 void       NV_API_CALL rm_acpi_notify(nvidia_stack_t *, nv_state_t *, NvU32);
 void       NV_API_CALL rm_acpi_nvpcf_notify(nvidia_stack_t *);

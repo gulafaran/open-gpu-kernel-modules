@@ -211,6 +211,8 @@
 --undefined=rm_get_power_info
 --undefined=rm_hwmon_set_polling
 --undefined=rm_hwmon_read
+--undefined=rm_fdinfo_get_util_samples
+--undefined=rm_fdinfo_get_vidmem
 --undefined=rm_disable_iomap_wc
 --undefined=rm_is_altstack_in_use
 --undefined=rm_acpi_nvpcf_notify
