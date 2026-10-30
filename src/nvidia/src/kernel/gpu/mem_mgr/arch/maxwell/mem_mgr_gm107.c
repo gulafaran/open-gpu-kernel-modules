@@ -1171,7 +1171,7 @@ memmgrSetMemDescPageSize_GM107
 
     if (ADDR_SYSMEM == addrSpace)
     {
-        NvU64 sysmemPageSize = osGetPageSize();
+        NvU64 sysmemPageSize = RM_OS_PAGE_SIZE_TO_GPU(osGetPageSize());
         RmPhysAddr physAddr = memdescGetPte(pMemDesc, addressTranslation, 0);
         switch (pageSizeAttr)
         {
