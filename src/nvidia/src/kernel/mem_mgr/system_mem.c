@@ -116,7 +116,7 @@ _sysmemGetNextSmallestPageSize
     }
 
     // Reached smallest page size. Return 0 to stop retrying.
-    if (pageSize == osGetPageSize())
+    if (pageSize <= osGetPageSize())
     {
         return 0ULL;
     }
