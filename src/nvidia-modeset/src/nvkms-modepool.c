@@ -1828,7 +1828,10 @@ static NvBool ValidateMode(NVDpyEvoPtr pDpyEvo,
         goto done;
     }
 
-    b2Heads1Or = nvEvoUse2Heads1OR(pDpyEvo, pTimingsEvo, pParams);
+    b2Heads1Or = nvEvoUse2Heads1OR(pDpyEvo, pTimingsEvo, &dpyColor,
+                                   pDpyOutputColorParams->formatSpecified,
+                                   pDpyOutputColorParams->bpcSpecified,
+                                   pParams);
 
     if (nvDpyIsHdmiEvo(pDpyEvo)) {
         NvBool foundFrlConfig = FALSE;

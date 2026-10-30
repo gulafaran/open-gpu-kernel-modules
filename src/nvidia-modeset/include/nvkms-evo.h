@@ -201,8 +201,8 @@ void nvLimitColorBpcEvo(const NVDpyEvoRec *pDpyEvo,
                         enum NvKmsDpyAttributeColorBpcValue maxBpc,
                         NVDpyAttributeColor *pDpyColor);
 
-NvBool nvDPValidateModeEvo(NVDpyEvoPtr pDpyEvo,
-                           NVHwModeTimingsEvoPtr pTimings,
+NvBool nvDPValidateModeEvo(const NVDpyEvoRec *pDpyEvo,
+                           const NVHwModeTimingsEvo *pTimings,
                            const NvBool colorFormatSpecified,
                            const NvBool colorBpcSpecified,
                            NVDpyAttributeColor *pDpyColor,
@@ -440,6 +440,9 @@ NvBool nvEvoGetSingleMergeHeadSectionHwModeTimings(
 
 NvBool nvEvoUse2Heads1OR(const NVDpyEvoRec *pDpyEvo,
                          const NVHwModeTimingsEvo *pTimings,
+                         const NVDpyAttributeColor *pDpyColor,
+                         const NvBool colorFormatSpecified,
+                         const NvBool colorBpcSpecified,
                          const struct NvKmsModeValidationParams *pParams);
 
 NvU32 nvGetRefreshRatex10K(const NVHwModeTimingsEvo *pTimings);
