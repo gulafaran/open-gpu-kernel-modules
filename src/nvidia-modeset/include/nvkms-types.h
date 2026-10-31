@@ -2422,6 +2422,7 @@ typedef struct _NVDpyEvoRec {
         HDMI_SRC_CAPS srcCaps;
         HDMI_SINK_CAPS sinkCaps;
         NvBool reassessFrlLinkCaps             : 1;
+        NvU8 frlLinkFailures;
     } hdmi;
 
     struct {
