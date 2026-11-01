@@ -4310,8 +4310,8 @@ NV_STATUS NV_API_CALL rm_perform_version_check(
 
 //
 // Handles the Power Source Change event(AC/DC) for Notebooks.
-// Notebooks from Maxwell have only one Gpu, so this functions grabs first Gpu
-// from GpuMgr and call subdevice RmControl.
+// The power source is system-wide, so every notebook GPU is told, the same ones
+// that are told at adapter init and system resume.
 //
 void NV_API_CALL rm_power_source_change_event(
     nvidia_stack_t *sp,
@@ -4329,29 +4329,40 @@ void NV_API_CALL rm_power_source_change_event(
     // LOCK: acquire API lock
     if ((rmStatus = rmapiLockAcquire(API_LOCK_FLAGS_NONE, RM_LOCK_MODULES_EVENT)) == NV_OK)
     {
-        OBJGPU *pGpu = gpumgrGetGpu(0);
-        if (pGpu != NULL)
+        OBJGPU *pGpu;
+        NvU32 gpuMask = 0;
+        NvU32 gpuInstance = 0;
+        NvU32 ac_plugged = 0;
+
+        //
+        // ACPI notify handlers can run concurrently, so event_val may
+        // already be out of date by the time the lock is acquired. Read
+        // the state again so that the last handler applies the latest one.
+        //
+        if (nv_acpi_get_powersource(&ac_plugged) == NV_OK)
+        {
+            event_val = !ac_plugged;
+        }
+
+        (void)gpumgrGetGpuAttachInfo(NULL, &gpuMask);
+
+        while ((pGpu = gpumgrGetNextGpu(gpuMask, &gpuInstance)) != NULL)
         {
             nv_priv_t *nvp;
-            NvU32 ac_plugged = 0;
 
             nv = NV_GET_NV_STATE(pGpu);
             nvp = NV_GET_NV_PRIV(nv);
+            rmStatus = NV_OK;
 
-            //
-            // ACPI notify handlers can run concurrently, so event_val may
-            // already be out of date by the time the lock is acquired. Read
-            // the state again so that the last handler applies the latest one.
-            //
-            if (nv_acpi_get_powersource(&ac_plugged) == NV_OK)
+            if ((nvp == NULL) || !nvp->b_mobile_config_enabled)
             {
-                event_val = !ac_plugged;
+                continue;
             }
 
             // Some systems generate spurious power source changed ACPI events.
             // Before entering the PM runtime and waking the GPU, see if the power
             // state has actually changed. If not, return without waking the GPU.
-            if ((nvp != NULL) && nvp->pm_state.PowerSourceKnown &&
+            if (nvp->pm_state.PowerSourceKnown &&
                 (nvp->pm_state.PowerSourceEventVal == event_val))
             {
                 // Nothing to do
@@ -4370,12 +4381,18 @@ void NV_API_CALL rm_power_source_change_event(
                 }
                 os_unref_dynamic_power(nv, NV_DYNAMIC_PM_FINE);
             }
+
+            if (rmStatus != NV_OK)
+            {
+                NV_PRINTF(LEVEL_ERROR,
+                          "%s: Failed to handle Power Source change event on GPU %u, status=0x%x\n",
+                          __FUNCTION__, pGpu->gpuInstance, rmStatus);
+            }
         }
         // UNLOCK: release API lock
         rmapiLockRelease();
     }
-
-    if (rmStatus != NV_OK)
+    else
     {
         NV_PRINTF(LEVEL_ERROR,
                   "%s: Failed to handle Power Source change event, status=0x%x\n",
@@ -6342,15 +6359,24 @@ void NV_API_CALL rm_acpi_nvpcf_notify(
     if ((rmStatus = rmapiLockAcquire(API_LOCK_FLAGS_NONE,
                                      RM_LOCK_MODULES_EVENT)) == NV_OK)
     {
-        OBJGPU *pGpu = gpumgrGetGpu(0);
+        OBJGPU *pGpu;
+        NvU32 gpuMask = 0;
+        NvU32 gpuInstance = 0;
+
+        (void)gpumgrGetGpuAttachInfo(NULL, &gpuMask);
+
         //
         // The only work done here is forwarding the event to clients. If no
         // client listens for NVPCF events (e.g. nvidia-powerd is not
         // running), skip it instead of waking a runtime-suspended GPU.
         //
-        if ((pGpu != NULL) &&
-            _rmGpuHasSubDeviceEventListener(pGpu, NV2080_NOTIFIERS_NVPCF_EVENTS))
+        while ((pGpu = gpumgrGetNextGpu(gpuMask, &gpuInstance)) != NULL)
         {
+            if (!_rmGpuHasSubDeviceEventListener(pGpu, NV2080_NOTIFIERS_NVPCF_EVENTS))
+            {
+                continue;
+            }
+
             nv_state_t *nv = NV_GET_NV_STATE(pGpu);
             if ((rmStatus = os_ref_dynamic_power(nv, NV_DYNAMIC_PM_FINE)) ==
                                                                          NV_OK)
