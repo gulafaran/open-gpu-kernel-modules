@@ -308,12 +308,18 @@ static NV_STATUS nv_alloc_coherent_pages(
     nvl = NV_GET_NVL_FROM_NV_STATE(nv);
     dev = nvl->dev;
 
-    gfp_mask = nv_compute_gfp_mask(nv, at);
+    /*
+     * The DMA API rejects __GFP_COMP, which at->order > 0 adds. The page table
+     * below needs linear addresses, so don't let dma-iommu use a remapped,
+     * discontiguous allocation.
+     */
+    gfp_mask = nv_compute_gfp_mask(nv, at) & ~__GFP_COMP;
 
-    virt_addr = (unsigned long)dma_alloc_coherent(dev,
-                                                  at->num_pages * PAGE_SIZE,
-                                                  &at->dma_handle,
-                                                  gfp_mask);
+    virt_addr = (unsigned long)dma_alloc_attrs(dev,
+                                               at->num_pages * PAGE_SIZE,
+                                               &at->dma_handle,
+                                               gfp_mask,
+                                               DMA_ATTR_FORCE_CONTIGUOUS);
     if (!virt_addr)
     {
         nv_printf(NV_DBG_MEMINFO,
@@ -352,8 +358,9 @@ static void nv_free_coherent_pages(
         nv_set_memory_type(at, 0, at->num_pages, NV_TRUE);
     }
 
-    dma_free_coherent(dev, at->num_pages * PAGE_SIZE,
-                      (void *)page_ptr->virt_addr, at->dma_handle);
+    dma_free_attrs(dev, at->num_pages * PAGE_SIZE,
+                   (void *)page_ptr->virt_addr, at->dma_handle,
+                   DMA_ATTR_FORCE_CONTIGUOUS);
 }
 
 typedef struct
