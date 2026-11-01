@@ -1557,6 +1557,13 @@ static acpi_status nv_acpi_find_battery_info(
         battery_technology_offset = BIF_BATTERY_TECHNOLOGY_OFFSET;
     }
 
+    if (object_package->package.count <= battery_technology_offset)
+    {
+        nv_printf(NV_DBG_INFO, "NVRM: Battery method output is too short\n");
+        kfree(buf.pointer);
+        return AE_OK;
+    }
+
     /*
      * Only checking here for Battery technology type.
      * Other fields like Battery Model/Serial number could also be checked but
