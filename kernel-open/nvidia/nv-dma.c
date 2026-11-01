@@ -883,7 +883,10 @@ NV_STATUS NV_API_CALL nv_dma_map_peer
         return NV_ERR_INVALID_REQUEST;
     }
 
-    if ((*va < res->start) || ((*va + (page_count * PAGE_SIZE)) > res->end))
+    /* res->end is the last valid address of the BAR, not one past it. */
+    if ((*va < res->start) ||
+        ((*va + (page_count * PAGE_SIZE) - 1) < *va) ||
+        ((*va + (page_count * PAGE_SIZE) - 1) > res->end))
     {
         NV_DMA_DEV_PRINTF(NV_DBG_ERRORS, peer_dma_dev,
                 "Mapping requested (start = 0x%llx, page_count = 0x%llx)"
