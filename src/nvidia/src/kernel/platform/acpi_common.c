@@ -1176,6 +1176,7 @@ _acpiCacheMethodData
     }
 
     // Fill in the Optimus caps Method Data.
+    rtnSize = sizeof(pGpu->acpiMethodData.capsMethodData.optimusCaps);
     status = osCallACPI_DSM(pGpu, ACPI_DSM_FUNCTION_NVOP, NVOP_FUNC_OPTIMUSCAPS,
                             &pGpu->acpiMethodData.capsMethodData.optimusCaps, &rtnSize);
     pGpu->acpiMethodData.capsMethodData.status = status;
