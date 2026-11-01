@@ -2432,6 +2432,10 @@ NvBool RmInitAdapter(
     if (nvp->b_mobile_config_enabled)
     {
         NvU32 ac_plugged = 0;
+
+        // This adapter init starts with a new RM state
+        nvp->pm_state.PowerSourceKnown = NV_FALSE;
+
         if (nv_acpi_get_powersource(&ac_plugged) == NV_OK)
         {
             // LOCK: acquire GPU lock

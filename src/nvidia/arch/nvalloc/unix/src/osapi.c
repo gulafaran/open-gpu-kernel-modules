@@ -1337,14 +1337,29 @@ NV_STATUS RmPowerSourceChangeEvent(
 {
     NV2080_CTRL_PERF_SET_POWERSTATE_PARAMS params = {0};
     RM_API *pRmApi = rmapiGetInterface(RMAPI_GPU_LOCK_INTERNAL);
+    nv_priv_t *nvp = NV_GET_NV_PRIV(pNv);
+    NV_STATUS status;
 
     params.powerStateInfo.powerState = event_val ? NV2080_CTRL_PERF_POWER_SOURCE_BATTERY :
                                                    NV2080_CTRL_PERF_POWER_SOURCE_AC;
 
-    return pRmApi->Control(pRmApi, pNv->rmapi.hClient,
-                           pNv->rmapi.hSubDevice,
-                           NV2080_CTRL_CMD_PERF_SET_POWERSTATE,
-                           &params, sizeof(params));
+    status = pRmApi->Control(pRmApi, pNv->rmapi.hClient,
+                             pNv->rmapi.hSubDevice,
+                             NV2080_CTRL_CMD_PERF_SET_POWERSTATE,
+                             &params, sizeof(params));
+
+    //
+    // Every caller holds the API lock, which protects this state. After a
+    // failure RM's power source is unknown, so the next event must not be
+    // filtered out by rm_power_source_change_event().
+    //
+    if (nvp != NULL)
+    {
+        nvp->pm_state.PowerSourceKnown = (status == NV_OK);
+        nvp->pm_state.PowerSourceEventVal = event_val;
+    }
+
+    return status;
 }
 
 /*!
@@ -4306,22 +4321,7 @@ void NV_API_CALL rm_power_source_change_event(
     THREAD_STATE_NODE threadState;
     void           *fp;
     nv_state_t     *nv;
-    static NvBool   first_event_seen = NV_FALSE;
-    static NvU32    last_event_val = 0;
     NV_STATUS       rmStatus = NV_OK;
-
-    // Some systems generate spurious power source changed ACPI events.
-    // Before entering the PM runtime and waking the GPU, see if the power
-    // state has actually changed. If not, return without waking the GPU.
-    if ((first_event_seen != NV_FALSE) && (last_event_val == event_val))
-    {
-        return;
-    }
-    else
-    {
-        first_event_seen = NV_TRUE;
-        last_event_val = event_val;
-    }
 
     NV_ENTER_RM_RUNTIME(sp,fp);
     threadStateInit(&threadState, THREAD_STATE_FLAGS_NONE);
@@ -4332,9 +4332,32 @@ void NV_API_CALL rm_power_source_change_event(
         OBJGPU *pGpu = gpumgrGetGpu(0);
         if (pGpu != NULL)
         {
+            nv_priv_t *nvp;
+            NvU32 ac_plugged = 0;
+
             nv = NV_GET_NV_STATE(pGpu);
-            if ((rmStatus = os_ref_dynamic_power(nv, NV_DYNAMIC_PM_FINE)) ==
-                                                                         NV_OK)
+            nvp = NV_GET_NV_PRIV(nv);
+
+            //
+            // ACPI notify handlers can run concurrently, so event_val may
+            // already be out of date by the time the lock is acquired. Read
+            // the state again so that the last handler applies the latest one.
+            //
+            if (nv_acpi_get_powersource(&ac_plugged) == NV_OK)
+            {
+                event_val = !ac_plugged;
+            }
+
+            // Some systems generate spurious power source changed ACPI events.
+            // Before entering the PM runtime and waking the GPU, see if the power
+            // state has actually changed. If not, return without waking the GPU.
+            if ((nvp != NULL) && nvp->pm_state.PowerSourceKnown &&
+                (nvp->pm_state.PowerSourceEventVal == event_val))
+            {
+                // Nothing to do
+            }
+            else if ((rmStatus = os_ref_dynamic_power(nv, NV_DYNAMIC_PM_FINE)) ==
+                                                                              NV_OK)
             {
                 // LOCK: acquire GPU lock
                 if ((rmStatus = rmGpuLocksAcquire(GPUS_LOCK_FLAGS_NONE, RM_LOCK_MODULES_EVENT)) ==
