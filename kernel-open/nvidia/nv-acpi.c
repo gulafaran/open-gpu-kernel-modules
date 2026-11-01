@@ -1363,6 +1363,7 @@ NvBool nv_acpi_power_resource_method_present(
     struct acpi_buffer buf = { ACPI_ALLOCATE_BUFFER, NULL };
     union acpi_object *object_package, *object_reference;
     acpi_status status;
+    u32 i;
 
     if (!handle)
         return NV_FALSE;
@@ -1383,28 +1384,35 @@ NvBool nv_acpi_power_resource_method_present(
 
     object_package = buf.pointer;
 
-    /*
-     * _PR3 object should be of type package and
-     * it should contain only one reference
-     */
-    if ((object_package->type != ACPI_TYPE_PACKAGE) &&
-        (object_package->package.count != 0x1))
+    /* _PR3 object should be of type package */
+    if (object_package->type != ACPI_TYPE_PACKAGE)
     {
         nv_printf(NV_DBG_ERRORS,"NVRM: _PR3 object is not a type 'package'\n");
         kfree(buf.pointer);
         return NV_FALSE;
     }
 
-    object_reference = object_package->package.elements;
-
-    /* Check for the reference and the actual type of the reference. */
-    if ((object_reference->reference.actual_type != ACPI_TYPE_POWER) &&
-        (object_reference->type !=  ACPI_TYPE_LOCAL_REFERENCE))
+    /* An empty package lists no power resources */
+    if (object_package->package.count == 0)
     {
-        nv_printf(NV_DBG_ERRORS,
-                     "NVRM: _PR3 object does not contain POWER Reference\n");
+        nv_printf(NV_DBG_INFO, "NVRM: _PR3 object is empty\n");
         kfree(buf.pointer);
         return NV_FALSE;
+    }
+
+    /* Check for the reference and the actual type of the reference. */
+    for (i = 0; i < object_package->package.count; i++)
+    {
+        object_reference = &object_package->package.elements[i];
+
+        if ((object_reference->type != ACPI_TYPE_LOCAL_REFERENCE) ||
+            (object_reference->reference.actual_type != ACPI_TYPE_POWER))
+        {
+            nv_printf(NV_DBG_ERRORS,
+                         "NVRM: _PR3 object does not contain POWER Reference\n");
+            kfree(buf.pointer);
+            return NV_FALSE;
+        }
     }
     kfree(buf.pointer);
     return NV_TRUE;
