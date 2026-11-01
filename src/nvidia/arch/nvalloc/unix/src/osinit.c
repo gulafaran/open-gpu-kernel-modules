@@ -2504,7 +2504,19 @@ void RmShutdownAdapter(
 
                 RmClearPrivateState(nv);
 
-                RmUnInitAcpiMethods(pSys);
+                //
+                // The ACPI notifiers are system-wide. Keep them while another
+                // GPU is attached, or it stops getting those events.
+                //
+                {
+                    NvU32 gpuCount = 0;
+
+                    (void)gpumgrGetGpuAttachInfo(&gpuCount, NULL);
+                    if (gpuCount == 0)
+                    {
+                        RmUnInitAcpiMethods(pSys);
+                    }
+                }
 
                 // UNLOCK: release GPUs lock
                 rmGpuLocksRelease(GPUS_LOCK_FLAGS_NONE, NULL);
