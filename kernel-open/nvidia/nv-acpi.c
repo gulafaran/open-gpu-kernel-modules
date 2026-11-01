@@ -1101,36 +1101,35 @@ NV_STATUS NV_API_CALL nv_acpi_ddc_method(
 
         ddc_arg0.integer.value = i;
         status = acpi_evaluate_object(lcd_dev_handle, "_DDC", &input, &output);
-        if (ACPI_SUCCESS(status)) {
-            ddc = output.pointer;
+        if (ACPI_FAILURE(status))
+            continue;
+
+        ddc = output.pointer;
+        if (ddc && (ddc->type == ACPI_TYPE_BUFFER) && (ddc->buffer.length > 0))
             break;
-        }
+
+        // The method ran but gave no EDID of this size, try the smaller one
+        kfree(ddc);
+        ddc = NULL;
     }
 
-    if (ACPI_FAILURE(status))
+    if (ddc == NULL)
     {
         nv_printf(NV_DBG_INFO,
-                  "NVRM: %s: failed status: %08x \n",
+                  "NVRM: %s: no EDID, last status: %08x \n",
                   __FUNCTION__,
                   status);
         return NV_ERR_GENERIC;
     }
-    else
+
+    if (ddc->buffer.length > *pSize)
     {
-        if (ddc && (ddc->type == ACPI_TYPE_BUFFER) && (ddc->buffer.length > 0))
-        {
-            if (ddc->buffer.length <= *pSize)
-            {
-                *pSize = NV_MIN(*pSize, ddc->buffer.length);
-                memcpy(pEdidBuffer, ddc->buffer.pointer, *pSize);
-            }
-            else
-            {
-                kfree(ddc);
-                return NV_ERR_BUFFER_TOO_SMALL;
-            }
-        }
+        kfree(ddc);
+        return NV_ERR_BUFFER_TOO_SMALL;
     }
+
+    *pSize = ddc->buffer.length;
+    memcpy(pEdidBuffer, ddc->buffer.pointer, *pSize);
 
     kfree(ddc);
     return NV_OK;
