@@ -318,8 +318,9 @@ kbusSetupPeerBarAccess_IMPL
     if (pLocalGpu != pRemoteGpu)
     {
         status = memdescMapIommu(pMemDesc, pRemoteGpu->busInfo.iovaspaceId);
-        if (status != NV_OK)
+        if ((status != NV_OK) && (*ppMemDesc == NULL))
         {
+            // A memdesc passed in by the caller stays the caller's to destroy.
             memdescDestroy(pMemDesc);
         }
         NV_ASSERT_OR_RETURN(status == NV_OK, ~0ULL);
