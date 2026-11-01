@@ -58,6 +58,8 @@ typedef struct nv_pm_state_s
     NvBool InHibernate;
     NvBool DNotifierPending;
     NvU32  DNotifierAuxPowerState;
+    NvBool PowerSourceKnown;
+    NvU32  PowerSourceEventVal;
 } nv_pm_state_t;
 
 /*
