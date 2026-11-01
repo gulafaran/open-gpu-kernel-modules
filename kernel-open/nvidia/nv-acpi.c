@@ -668,6 +668,11 @@ static NV_STATUS nv_acpi_extract_package(
     *data_size = 0;
     for (i = 0; i < acpi_object->package.count; i++)
     {
+        //
+        // A NULL element doesn't set element_size, so it leaves a gap the size
+        // of the previous element. That gap may not fit in what's left.
+        //
+        element_size = NV_MIN(element_size, buffer_size);
         buffer = ((char *)buffer + element_size);
         buffer_size -= element_size;
 
@@ -676,7 +681,7 @@ static NV_STATUS nv_acpi_extract_package(
         if (status != NV_OK)
             break;
 
-        *data_size += element_size;
+        *data_size += NV_MIN(element_size, buffer_size);
     }
 
     return status;
@@ -885,7 +890,7 @@ static NV_STATUS nv_acpi_evaluate_dsm_method(
     union acpi_object *dsm = NULL;
     struct acpi_buffer output = { ACPI_ALLOCATE_BUFFER, NULL };
     union acpi_object dsm_params[4];
-    NvU32 data_size;
+    NvU32 data_size = 0;
 
     if (!NV_MAY_SLEEP())
     {
