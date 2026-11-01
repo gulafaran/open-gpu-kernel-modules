@@ -2416,9 +2416,9 @@ nv_pci_probe_body
 
         NV_DEV_PRINTF(NV_DBG_INFO, nv, "ATS supported by this GPU!\n");
 
-#if NV_IS_EXPORT_SYMBOL_GPL_iommu_dev_enable_feature
 #if defined(CONFIG_IOMMU_SVA) && \
     (defined(NV_IOASID_GET_PRESENT) || defined(NV_MM_PASID_DROP_PRESENT))
+#if NV_IS_EXPORT_SYMBOL_GPL_iommu_dev_enable_feature
         ret = iommu_dev_enable_feature(nvl->dev, IOMMU_DEV_FEAT_SVA);
         if (ret == 0)
         {
@@ -2434,12 +2434,12 @@ nv_pci_probe_body
                           "Enabling SMMU SVA feature failed! ret: %d\n", ret);
             nv->ats_support = NV_FALSE;
         }
+#endif // NV_IS_EXPORT_SYMBOL_GPL_iommu_dev_enable_feature
 #else
         NV_DEV_PRINTF(NV_DBG_ERRORS, nv,
                       "Enabling SMMU SVA feature failed due to lack of necessary kernel configs.\n");
         nv->ats_support = NV_FALSE;
 #endif
-#endif // NV_IS_EXPORT_SYMBOL_GPL_iommu_dev_enable_feature
     }
 
     if (pci_devid_is_self_hosted(pci_dev->device))
