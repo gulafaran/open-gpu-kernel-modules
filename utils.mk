@@ -249,6 +249,25 @@ AS_HAS_INSTR = \
  $(shell if ($(ECHO) "$(1)" | $(CC) -c -x assembler - -o /dev/null) >/dev/null 2>&1 ;\
    then $(ECHO) "1"; else $(ECHO) ""; fi)
 
+##############################################################################
+# NV_KERNEL_IBT is "1" unless the target kernel's .config is found and has
+# CONFIG_X86_KERNEL_IBT unset. With kernel IBT, every indirect branch target,
+# including switch jump table entries, must start with ENDBR64, so the
+# OS-agnostic objects linked into the modules need -fcf-protection=branch
+# and -fno-jump-tables. The kernel output tree is located like
+# kernel-open/Makefile does: SYSOUT, else SYSSRC, else the running kernel's
+# build directory.
+##############################################################################
+
+NV_KERNEL_CONFIG_FILE = $(strip \
+ $(if $(SYSOUT),$(SYSOUT)/.config,$(if $(SYSSRC),$(SYSSRC)/.config,\
+   /lib/modules/$(if $(KERNEL_UNAME),$(KERNEL_UNAME),$(shell uname -r))/build/.config)))
+
+NV_KERNEL_IBT = \
+ $(shell if test -r "$(NV_KERNEL_CONFIG_FILE)" && \
+   ! grep -q '^CONFIG_X86_KERNEL_IBT=y' "$(NV_KERNEL_CONFIG_FILE)"; \
+   then $(ECHO) ""; else $(ECHO) "1"; fi)
+
 
 ##############################################################################
 # define variables used when installing the open source utilities from
