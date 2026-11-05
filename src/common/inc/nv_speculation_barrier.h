@@ -118,11 +118,7 @@
 
 static inline void nv_speculation_barrier(void)
 {
-
-#if defined(__GNUC__) || defined(__clang__)
-    __asm__ __volatile__ ("lfence" : : : "memory");
-#endif
-
+    /* mitigation disabled */
 }
 
 #elif defined(NV_SPECULATION_BARRIER_PPC)
@@ -183,6 +179,10 @@ static inline void nv_speculation_barrier(void)
 static inline unsigned long nv_array_index_no_speculate(unsigned long index,
                         unsigned long count)
 {
+    /* mitigation disabled */
+    (void)count;
+    return index;
+
 #if defined(NV_SPECULATION_BARRIER_x86) && (defined(__GNUC__) || defined(__clang__))
     unsigned long mask;
 

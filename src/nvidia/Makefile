@@ -186,19 +186,30 @@ ifeq ($(TARGET_ARCH),x86_64)
       $(shell $(VERSION_MK_DIR)/nv-compiler.sh version_is_at_least $(CC) 140000)
   endif
 
-  ifeq ($(FCF_SUPPORTED),1)
-    FCF_PROTECTION := return
+  # Spectre mitigations disabled
+  CONDITIONAL_CFLAGS += $(call TEST_CC_ARG, -mindirect-branch=keep)
+  CONDITIONAL_CFLAGS += $(call TEST_CC_ARG, -mfunction-return=keep)
 
-    ifeq ($(ENDBR_SUPPORTED)-$(NV_KERNEL_TRACING),1-)
-      FCF_PROTECTION := full
+  #
+  # Kernel IBT (CONFIG_X86_KERNEL_IBT) faults on indirect branches to code
+  # without ENDBR64, so keep the upstream CET flags unless the kernel is
+  # known to be built without it (see NV_KERNEL_IBT in utils.mk).
+  #
+  ifeq ($(NV_KERNEL_IBT),1)
+    ifeq ($(FCF_SUPPORTED),1)
+      FCF_PROTECTION := return
+
+      ifeq ($(ENDBR_SUPPORTED)-$(NV_KERNEL_TRACING),1-)
+        FCF_PROTECTION := full
+      endif
     endif
+    ifneq ($(FCF_PROTECTION),)
+      CONDITIONAL_CFLAGS += $(call TEST_CC_ARG, -fcf-protection=$(FCF_PROTECTION))
+    endif
+    CONDITIONAL_CFLAGS += $(call TEST_CC_ARG, -fno-jump-tables)
+  else
+    CONDITIONAL_CFLAGS += $(call TEST_CC_ARG, -fcf-protection=none)
   endif
-  ifneq ($(FCF_PROTECTION),)
-    CONDITIONAL_CFLAGS += $(call TEST_CC_ARG, -fcf-protection=$(FCF_PROTECTION))
-  endif
-  CONDITIONAL_CFLAGS += $(call TEST_CC_ARG, -fno-jump-tables)
-  CONDITIONAL_CFLAGS += $(call TEST_CC_ARG, -mindirect-branch-register)
-    CONDITIONAL_CFLAGS += $(call TEST_CC_ARG, -mindirect-branch=thunk-extern)
 endif
 
 CFLAGS += $(CONDITIONAL_CFLAGS)
