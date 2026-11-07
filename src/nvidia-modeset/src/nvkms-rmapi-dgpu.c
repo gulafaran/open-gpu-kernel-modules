@@ -26,6 +26,8 @@
 
 #include "nvkms-rmapi.h"
 #include "nv_assert.h"
+#include "nvctassert.h"
+#include "nvmisc.h"
 
 NvU32 nvRmApiAlloc(
     NvU32 hClient,
@@ -205,6 +207,44 @@ NvU32 nvRmApiMapMemory(
     *ppLinearAddress = NvP64_VALUE(ops.params.mapMemory.pLinearAddress);
 
     return ops.params.mapMemory.status;
+}
+
+NvU32 nvRmApiMapMemoryRanges(
+    NvU32 hClient,
+    NvU32 hDevice,
+    NvU32 hMemory,
+    NvU64 offset,
+    NvU64 length,
+    void **ppLinearAddress,
+    NvU32 flags,
+    NvU64 (*pRanges)[2],
+    NvU32 maxRanges,
+    NvU32 *pNumRanges)
+{
+    nvidia_kernel_rmapi_ops_t ops = { 0 };
+    nv_kernel_rmapi_map_memory_ranges_t *p = &ops.params.mapMemoryRanges;
+
+    ct_assert(sizeof(nv_kernel_rmapi_range_t) == sizeof(pRanges[0]));
+    ct_assert(NV_OFFSETOF(nv_kernel_rmapi_range_t, start) == 0);
+    ct_assert(NV_OFFSETOF(nv_kernel_rmapi_range_t, size) == sizeof(NvU64));
+
+    ops.op = NV_KERNEL_RMAPI_MAP_MEMORY_RANGES;
+
+    p->mapMemory.hClient = hClient;
+    p->mapMemory.hDevice = hDevice;
+    p->mapMemory.hMemory = hMemory;
+    p->mapMemory.offset  = offset;
+    p->mapMemory.length  = length;
+    p->mapMemory.flags   = flags;
+    p->pRanges           = (nv_kernel_rmapi_range_t *)pRanges;
+    p->maxRanges         = maxRanges;
+
+    nvkms_call_rm(&ops);
+
+    *ppLinearAddress = NvP64_VALUE(p->mapMemory.pLinearAddress);
+    *pNumRanges = p->numRanges;
+
+    return p->mapMemory.status;
 }
 
 NvU32 nvRmApiUnmapMemory(

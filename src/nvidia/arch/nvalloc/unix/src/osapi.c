@@ -5366,6 +5366,57 @@ void NV_API_CALL rm_disable_gpu_state_persistence(nvidia_stack_t *sp, nv_state_t
     NV_EXIT_RM_RUNTIME(sp,fp);
 }
 
+static void RmKernelMapMemoryRanges(nv_kernel_rmapi_map_memory_ranges_t *pParams)
+{
+    NV_KERNEL_RMAPI_RANGE_SINK sink = { pParams->pRanges, pParams->maxRanges, 0 };
+    NV_KERNEL_RMAPI_RANGE_SINK **ppSink;
+
+    pParams->numRanges = 0;
+
+    if ((pParams->pRanges == NULL) && (pParams->maxRanges != 0))
+    {
+        pParams->mapMemory.status = NV_ERR_INVALID_ARGUMENT;
+        return;
+    }
+
+    ppSink = (NV_KERNEL_RMAPI_RANGE_SINK **) tlsEntryAcquire(TLS_ENTRY_ID_MAP_RANGES);
+    if (ppSink == NULL)
+    {
+        pParams->mapMemory.status = NV_ERR_NO_MEMORY;
+        return;
+    }
+    *ppSink = &sink;
+
+    Nv04MapMemoryKernel(&pParams->mapMemory);
+
+    // sink lives on this stack; don't leave it behind in the entry
+    *ppSink = NULL;
+    tlsEntryRelease(TLS_ENTRY_ID_MAP_RANGES);
+
+    if (pParams->mapMemory.status != NV_OK)
+    {
+        return;
+    }
+
+    pParams->numRanges = sink.numRanges;
+
+    if (sink.numRanges > pParams->maxRanges)
+    {
+        NVOS34_PARAMETERS unmapParams = { 0 };
+
+        unmapParams.hClient        = pParams->mapMemory.hClient;
+        unmapParams.hDevice        = pParams->mapMemory.hDevice;
+        unmapParams.hMemory        = pParams->mapMemory.hMemory;
+        unmapParams.pLinearAddress = pParams->mapMemory.pLinearAddress;
+        unmapParams.flags          = pParams->mapMemory.flags;
+
+        Nv04UnmapMemoryKernel(&unmapParams);
+
+        pParams->mapMemory.pLinearAddress = NvP64_NULL;
+        pParams->mapMemory.status = NV_ERR_BUFFER_TOO_SMALL;
+    }
+}
+
 void  NV_API_CALL  rm_kernel_rmapi_op(nvidia_stack_t *sp, void *ops_cmd)
 {
     nvidia_kernel_rmapi_ops_t *ops = ops_cmd;
@@ -5429,6 +5480,10 @@ void  NV_API_CALL  rm_kernel_rmapi_op(nvidia_stack_t *sp, void *ops_cmd)
 
         case NV04_ADD_VBLANK_CALLBACK:
             Nv04AddVblankCallbackKernel(&ops->params.addVblankCallback);
+            break;
+
+        case NV_KERNEL_RMAPI_MAP_MEMORY_RANGES:
+            RmKernelMapMemoryRanges(&ops->params.mapMemoryRanges);
             break;
     }
 

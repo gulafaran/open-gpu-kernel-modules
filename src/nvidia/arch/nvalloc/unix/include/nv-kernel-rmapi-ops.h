@@ -37,6 +37,48 @@
 #include "nvtypes.h"
 #include "nvos.h"
 
+/*
+ * NV04_MAP_MEMORY for kernel clients that build a user-space mapping
+ * themselves (NVOS33_FLAGS_MEM_SPACE_USER, e.g. nvidia-drm GEM mmap through
+ * NVKMS), returning every bus address range of the mapping.
+ *
+ * A BAR1 mapping of video memory is several ranges when the memory isn't
+ * physically contiguous and static BAR1 maps video memory 1:1, or when BAR1
+ * is too fragmented for one range. A plain NV04_MAP_MEMORY returns only the
+ * start of the first range, so kernel clients are limited to single-range
+ * mappings there.
+ *
+ * pRanges/maxRanges is the caller's buffer. numRanges returns the number of
+ * ranges, or 0 if the mapping isn't described by bus address ranges (then
+ * only mapMemory.pLinearAddress is valid). If there are more than maxRanges,
+ * the mapping is undone, mapMemory.status is NV_ERR_BUFFER_TOO_SMALL and
+ * numRanges tells the size needed. Unmap with NV04_UNMAP_MEMORY and
+ * mapMemory.pLinearAddress as usual.
+ */
+#define NV_KERNEL_RMAPI_MAP_MEMORY_RANGES (0x80000000 | NV04_MAP_MEMORY)
+
+typedef struct {
+    NvU64 start;    /* bus address */
+    NvU64 size;
+} nv_kernel_rmapi_range_t;
+
+typedef struct {
+    NVOS33_PARAMETERS        mapMemory;     /* IN/OUT, as for NV04_MAP_MEMORY */
+    nv_kernel_rmapi_range_t *pRanges;       /* IN */
+    NvU32                    maxRanges;     /* IN */
+    NvU32                    numRanges;     /* OUT */
+} nv_kernel_rmapi_map_memory_ranges_t;
+
+/*
+ * Where osMapPciMemoryAreaUser() records the ranges while RM handles
+ * NV_KERNEL_RMAPI_MAP_MEMORY_RANGES (TLS_ENTRY_ID_MAP_RANGES).
+ */
+typedef struct {
+    nv_kernel_rmapi_range_t *pRanges;
+    NvU32                    maxRanges;
+    NvU32                    numRanges;
+} NV_KERNEL_RMAPI_RANGE_SINK;
+
 typedef struct {
     NvU32 op; /* One of the NV0[14]_XXXX operations listed below. */
 
@@ -55,6 +97,7 @@ typedef struct {
         NVOS55_PARAMETERS dupObject;           /* NV04_DUP_OBJECT */
         NVOS57_PARAMETERS share;               /* NV04_SHARE */
         NVOS61_PARAMETERS addVblankCallback;   /* NV04_ADD_VBLANK_CALLBACK */
+        nv_kernel_rmapi_map_memory_ranges_t mapMemoryRanges; /* NV_KERNEL_RMAPI_MAP_MEMORY_RANGES */
     } params;
 } nvidia_kernel_rmapi_ops_t;
 

@@ -43,6 +43,14 @@ struct nv_drm_gem_nvkms_memory {
     bool physically_mapped;
     void *pPhysicalAddress;
     void *pWriteCombinedIORemapAddress;
+    /*
+     * The bus address ranges of a video memory mapping that isn't one
+     * contiguous block (ranges_count > 1), and the end offset of each range
+     * in the object; NULL otherwise. Written like pPhysicalAddress.
+     */
+    struct NvKmsKapiMemoryRange *ranges;
+    NvU64 *range_ends;
+    NvU32 ranges_count;
 #if defined(NVCPU_AARCH64)
     void *pNumaVMapAddress;
 #endif

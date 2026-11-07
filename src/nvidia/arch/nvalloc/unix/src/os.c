@@ -22,6 +22,7 @@
  */
 
 #include <nv.h>                     // NV device driver interface
+#include <nv-kernel-rmapi-ops.h>
 #include <nv-priv.h>
 #include <nv-caps.h>
 #include <os/os.h>
@@ -1238,6 +1239,30 @@ NV_STATUS osUnlockMem(
     return NV_ERR_NOT_SUPPORTED;
 }
 
+//
+// Hands the ranges of a user-space mapping made for a kernel client to
+// NV_KERNEL_RMAPI_MAP_MEMORY_RANGES, which is waiting for them in TLS.
+//
+static void _osRecordMapRanges(MemoryArea memArea)
+{
+    NV_KERNEL_RMAPI_RANGE_SINK *pSink =
+        NvP64_VALUE(tlsEntryGet(TLS_ENTRY_ID_MAP_RANGES));
+    NvU64 i;
+
+    if (pSink == NULL)
+    {
+        return;
+    }
+
+    for (i = 0; (i < memArea.numRanges) && (i < pSink->maxRanges); i++)
+    {
+        pSink->pRanges[i].start = memArea.pRanges[i].start;
+        pSink->pRanges[i].size  = memArea.pRanges[i].size;
+    }
+    pSink->numRanges = (memArea.numRanges > NV_U32_MAX) ?
+                       NV_U32_MAX : (NvU32)memArea.numRanges;
+}
+
 NV_STATUS osMapPciMemoryAreaUser
 (
     OS_GPU_INFO *pOsGpuInfo,
@@ -1259,6 +1284,8 @@ NV_STATUS osMapPciMemoryAreaUser
         *pPriv = NULL;
         return NV_OK;
     }
+
+    _osRecordMapRanges(memArea);
 
     // Fix alignment insofar as we can (middle blocks can't be force-aligned this way)
     origStart = memArea.pRanges[0].start;
