@@ -304,6 +304,13 @@ void nvUnbloatHwModeTimingsEvo(NVHwModeTimingsEvoPtr pTimings, NvU32 factor);
 NvBool nvReadCRC32Evo(NVDispEvoPtr pDispEvo, NvU32 head,
                       CRC32NotifierCrcOut *crcOut /* out */);
 
+NvBool nvStartHeadCRC32CaptureEvo(NVDispEvoPtr pDispEvo, NvU32 apiHead);
+void nvStopHeadCRC32CaptureEvo(NVDispEvoPtr pDispEvo, NvU32 apiHead);
+NvBool nvReadHeadCRC32CaptureEvo(NVDispEvoPtr pDispEvo, NvU32 apiHead,
+                                 NvU32 source, NvU32 maxEntries,
+                                 NvU32 *pCrcs, NvU32 *pNumEntries,
+                                 NvU32 *pLostEntries);
+
 NvBool nvFreeDevEvo(NVDevEvoPtr pDevEvo);
 NVDevEvoPtr nvAllocDevEvo(const struct NvKmsAllocDeviceRequest *pRequest,
                           enum NvKmsAllocDeviceStatus *pStatus);

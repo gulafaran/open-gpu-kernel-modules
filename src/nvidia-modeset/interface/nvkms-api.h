@@ -273,6 +273,7 @@ enum NvKmsIoctlCommand {
     NVKMS_IOCTL_GET_NEXT_EVENTS,
     NVKMS_IOCTL_MST_I2C_TRANSFER,
     NVKMS_IOCTL_QUERY_HEAD_RASTER,
+    NVKMS_IOCTL_HEAD_CRC32_CAPTURE,
 };
 
 
@@ -4600,6 +4601,62 @@ struct NvKmsQueryHeadRasterReply {
 struct NvKmsQueryHeadRasterParams {
     struct NvKmsQueryHeadRasterRequest request; /*! in */
     struct NvKmsQueryHeadRasterReply reply;     /*! out */
+};
+
+/*!
+ * NVKMS_IOCTL_HEAD_CRC32_CAPTURE:
+ *
+ * Capture a CRC for every frame scanned out on a head, for DRM's CRC
+ * interface.
+ *
+ * START arms the capture on the head's current primary hardware head,
+ * stopping a previous capture first. It fails if the head isn't active.
+ * Start again after a modeset of the head: the capture stays on the hardware
+ * head it was armed on.
+ *
+ * READ returns the CRCs of the frames completed since the last READ, oldest
+ * first, up to NVKMS_HEAD_CRC32_MAX_ENTRIES; read again while numEntries is
+ * the maximum. lostEntries is the number of frames before them that got no
+ * CRC. READ fails if the capture isn't running (it is stopped when the
+ * display hardware is torn down, e.g. for suspend) or couldn't continue on
+ * the head; START again then.
+ *
+ * STOP disarms the capture and frees its memory.
+ *
+ * This IOCTL can only be used by kernel-mode clients.
+ */
+
+#define NVKMS_HEAD_CRC32_MAX_ENTRIES 64
+
+enum NvKmsHeadCRC32CaptureOp {
+    NVKMS_HEAD_CRC32_CAPTURE_START = 0,
+    NVKMS_HEAD_CRC32_CAPTURE_STOP  = 1,
+    NVKMS_HEAD_CRC32_CAPTURE_READ  = 2,
+};
+
+enum NvKmsHeadCRC32Source {
+    NVKMS_HEAD_CRC32_SOURCE_OUTPUT     = 0, /* the OR/SF output */
+    NVKMS_HEAD_CRC32_SOURCE_RG         = 1, /* the raster generator */
+    NVKMS_HEAD_CRC32_SOURCE_COMPOSITOR = 2, /* the composited image */
+};
+
+struct NvKmsHeadCRC32CaptureRequest {
+    NvKmsDeviceHandle deviceHandle;
+    NvKmsDispHandle dispHandle;
+    NvU32 head;
+    NvU32 op;     /* enum NvKmsHeadCRC32CaptureOp */
+    NvU32 source; /* enum NvKmsHeadCRC32Source, for READ */
+};
+
+struct NvKmsHeadCRC32CaptureReply {
+    NvU32 numEntries;
+    NvU32 lostEntries;
+    NvU32 crc32[NVKMS_HEAD_CRC32_MAX_ENTRIES];
+};
+
+struct NvKmsHeadCRC32CaptureParams {
+    struct NvKmsHeadCRC32CaptureRequest request; /*! in */
+    struct NvKmsHeadCRC32CaptureReply reply;     /*! out */
 };
 
 /*!

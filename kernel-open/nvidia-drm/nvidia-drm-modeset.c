@@ -767,6 +767,15 @@ nv_drm_atomic_apply_modeset_config(struct drm_device *dev,
     }
 
     if (commit) {
+        for_each_new_crtc_in_state(state, crtc, new_crtc_state, i) {
+            if (drm_atomic_crtc_needs_modeset(new_crtc_state) &&
+                new_crtc_state->active) {
+                nv_drm_crtc_crc_modeset(to_nv_crtc(crtc));
+            }
+        }
+    }
+
+    if (commit) {
         __nv_drm_put_in_fences(nv_dev, state, false /* failed */);
     }
 

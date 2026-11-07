@@ -1363,6 +1363,21 @@ typedef struct _NVEvoDevRec {
     struct {
         NVEvoDma dma;
     } rgSemaDma[NV_MAX_HEADS];
+
+    /*
+     * Continuous per-frame CRC capture, see NVKMS_IOCTL_HEAD_CRC32_CAPTURE.
+     * Indexed by apiHead on disp 0. The hardware fills one notifier while the
+     * other is idle; reading switches them before the current one is full.
+     */
+    struct {
+        NVEvoDma ctx[2];
+        NvU32 hwHead;
+        NvU16 readIdx;   /* next entry to read in ctx[cur] */
+        NvU8 cur;
+        NvU8 switchReads; /* reads since the switch started */
+        NvBool enabled;
+        NvBool switching; /* ctx[cur] is being released for ctx[cur ^ 1] */
+    } crcCapture[NVKMS_MAX_HEADS_PER_DISP];
 } NVDevEvoRec;
 
 /*

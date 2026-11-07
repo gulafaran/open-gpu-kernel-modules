@@ -4977,6 +4977,46 @@ static NvBool QueryHeadRaster(struct NvKmsPerOpen *pOpen,
     return TRUE;
 }
 
+static NvBool HeadCRC32Capture(struct NvKmsPerOpen *pOpen,
+                               void *pParamsVoid)
+{
+    struct NvKmsHeadCRC32CaptureParams *pParams = pParamsVoid;
+    NVDispEvoPtr pDispEvo = GetDispEvo(pOpen, pParams->request.deviceHandle);
+    const NvU32 apiHead = pParams->request.head;
+
+    if (pDispEvo == NULL) {
+        return FALSE;
+    }
+
+    /* Only kernel clients: the capture belongs to the device, not the open. */
+    if (pOpen->clientType != NVKMS_CLIENT_KERNEL_SPACE) {
+        return FALSE;
+    }
+
+    if (apiHead >= NVKMS_MAX_HEADS_PER_DISP) {
+        return FALSE;
+    }
+
+    nvkms_memset(&pParams->reply, 0, sizeof(pParams->reply));
+
+    switch (pParams->request.op) {
+    case NVKMS_HEAD_CRC32_CAPTURE_START:
+        return nvStartHeadCRC32CaptureEvo(pDispEvo, apiHead);
+    case NVKMS_HEAD_CRC32_CAPTURE_STOP:
+        nvStopHeadCRC32CaptureEvo(pDispEvo, apiHead);
+        return TRUE;
+    case NVKMS_HEAD_CRC32_CAPTURE_READ:
+        return nvReadHeadCRC32CaptureEvo(pDispEvo, apiHead,
+                                         pParams->request.source,
+                                         ARRAY_LEN(pParams->reply.crc32),
+                                         pParams->reply.crc32,
+                                         &pParams->reply.numEntries,
+                                         &pParams->reply.lostEntries);
+    default:
+        return FALSE;
+    }
+}
+
 static NvBool UnregisterVblankIntrCallback(struct NvKmsPerOpen *pOpen,
                                            void *pParamsVoid)
 {
@@ -5171,6 +5211,7 @@ NvBool nvKmsIoctl(
         ENTRY(NVKMS_IOCTL_GET_NEXT_EVENTS, GetNextEvents),
         ENTRY(NVKMS_IOCTL_MST_I2C_TRANSFER, MstI2cTransfer),
         ENTRY(NVKMS_IOCTL_QUERY_HEAD_RASTER, QueryHeadRaster),
+        ENTRY(NVKMS_IOCTL_HEAD_CRC32_CAPTURE, HeadCRC32Capture),
     };
 
     struct NvKmsPerOpen *pOpen = pOpenVoid;

@@ -7021,13 +7021,8 @@ static void EvoStartHeadCRC32CaptureC3(NVDevEvoPtr pDevEvo,
                                        NvU32 head,
                                        NVEvoUpdateState *updateState)
 {
-    const NvU32 winChannel = head << 1;
     NVEvoChannelPtr pChannel = pDevEvo->core;
     NvU32 orOutput = 0;
-
-    /* The window channel should fit in
-     * NVC37D_HEAD_SET_CRC_CONTROL_CONTROLLING_CHANNEL */
-    nvAssert(winChannel < DRF_MASK(NVC37D_HEAD_SET_CRC_CONTROL_CONTROLLING_CHANNEL));
 
     nvUpdateUpdateState(pDevEvo, updateState, pChannel);
 
@@ -7058,7 +7053,14 @@ static void EvoStartHeadCRC32CaptureC3(NVDevEvoPtr pDevEvo,
     nvDmaSetEvoMethodData(pChannel,
         DRF_NUM(C37D, _HEAD_SET_CRC_CONTROL, _PRIMARY_CRC, orOutput) |
         DRF_DEF(C37D, _HEAD_SET_CRC_CONTROL, _SECONDARY_CRC, _NONE) |
-        DRF_NUM(C37D, _HEAD_SET_CRC_CONTROL, _CONTROLLING_CHANNEL, winChannel) |
+        /*
+         * The core channel controls the capture, which is armed and disarmed
+         * with core updates; with a window channel, the hardware only writes
+         * a CRC when that window updates, so none for a static image.
+         * CONTROLLING_CHANNEL is 6 bits with CORE since C57D, the oldest
+         * class using this.
+         */
+        DRF_DEF(C57D, _HEAD_SET_CRC_CONTROL, _CONTROLLING_CHANNEL, _CORE) |
         DRF_DEF(C37D, _HEAD_SET_CRC_CONTROL, _EXPECT_BUFFER_COLLAPSE, _FALSE) |
         DRF_DEF(C37D, _HEAD_SET_CRC_CONTROL, _CRC_DURING_SNOOZE, _DISABLE));
 

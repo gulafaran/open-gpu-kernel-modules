@@ -706,6 +706,16 @@ struct NvKmsKapiCallbacks {
     void (*probe)(const struct NvKmsKapiGpuInfo *gpu_info);
 };
 
+#define NVKMS_KAPI_CRC32_CAPTURE_START    0
+#define NVKMS_KAPI_CRC32_CAPTURE_STOP     1
+#define NVKMS_KAPI_CRC32_CAPTURE_READ     2
+
+#define NVKMS_KAPI_CRC32_SOURCE_OUTPUT     0
+#define NVKMS_KAPI_CRC32_SOURCE_RG         1
+#define NVKMS_KAPI_CRC32_SOURCE_COMPOSITOR 2
+
+#define NVKMS_KAPI_CRC32_MAX_ENTRIES      64
+
 struct NvKmsKapiHeadRaster {
     NvU32 regOffset;
     NvU32 firstActiveLine;
@@ -1824,6 +1834,37 @@ struct NvKmsKapiFunctionsTable {
     NvBool (*getHeadRaster)(struct NvKmsKapiDevice *device,
                             NvU32 head,
                             struct NvKmsKapiHeadRaster *pInfo);
+
+    /*!
+     * Start, stop or read a continuous per-frame CRC capture on a head, see
+     * NVKMS_IOCTL_HEAD_CRC32_CAPTURE. Must be called from a context that can
+     * sleep.
+     *
+     * \param [in]  device   A device allocated using allocateDevice().
+     *
+     * \param [in]  head     The head.
+     *
+     * \param [in]  op       NVKMS_KAPI_CRC32_CAPTURE_{START,STOP,READ}.
+     *
+     * \param [in]  source   NVKMS_KAPI_CRC32_SOURCE_*, for READ.
+     *
+     * \param [out] pCrcs    For READ: up to NVKMS_KAPI_CRC32_MAX_ENTRIES
+     *                       CRCs of the frames completed since the last READ.
+     *
+     * \param [out] pNumEntries  For READ: the number of CRCs in pCrcs.
+     *
+     * \param [out] pLostEntries For READ: frames before them without a CRC.
+     *
+     * \return NV_FALSE if the operation failed; for READ, if the capture
+     *         isn't running anymore and needs to be started again.
+     */
+    NvBool (*headCrc32Capture)(struct NvKmsKapiDevice *device,
+                               NvU32 head,
+                               NvU32 op,
+                               NvU32 source,
+                               NvU32 *pCrcs,
+                               NvU32 *pNumEntries,
+                               NvU32 *pLostEntries);
 
     /* One bounded MST I2C transfer; serialized with modesetting and PM. */
     NvBool (*mstI2cTransfer)(struct NvKmsKapiDevice *device,

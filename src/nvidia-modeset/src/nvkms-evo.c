@@ -51,6 +51,7 @@
 #include "nvkms-vrr.h"
 #include "nvkms-ioctl.h"
 #include "nvkms-setlut-workarea.h"
+#include "class/clc37dcrcnotif.h" /* NVC37D_NOTIFIER_CRC_* */
 
 #include "nvctassert.h"
 
@@ -4836,6 +4837,8 @@ static void UnregisterFlipOccurredEventOneHead(NVDispEvoRec *pDispEvo,
     }
 }
 
+static void FreeAllHeadCRC32Captures(NVDevEvoPtr pDevEvo);
+
 static void ClearApiHeadStateOneDisp(NVDispEvoRec *pDispEvo)
 {
     NvU32 apiHead;
@@ -5609,6 +5612,8 @@ void nvFreeCoreChannelEvo(NVDevEvoPtr pDevEvo)
 
     /* Descriptors bound to this core channel need a new bind. */
     pDevEvo->surfaceDescGeneration++;
+
+    FreeAllHeadCRC32Captures(pDevEvo);
 
     ClearApiHeadState(pDevEvo);
 
@@ -9347,6 +9352,302 @@ done:
     nvFree(dma);
 
     return res;
+}
+
+/*
+ * Continuous CRC capture for one API head, for DRM's per-frame CRC interface.
+ *
+ * Once HEAD_SET_CRC_CONTROL is armed the hardware writes one entry per frame
+ * into the CRC notifier, up to CRC_CAPTURE_ENTRIES, then stops. Like nouveau,
+ * use two notifiers and switch to the idle one before the current one fills
+ * up: disarming releases the current notifier (it reads DONE once the
+ * hardware is through with it) and arming again starts the other one. The
+ * disarm has to complete before the arm is sent: pushed back to back, both
+ * take effect at the same vblank, which only changes the notifier of an
+ * armed capture, and the hardware keeps writing the old one. The frame
+ * between the two updates gets no CRC.
+ *
+ * The notifier layout is the same on all nvdisplay classes: a status word,
+ * then 8-word entries starting at word 8 with the compositor, RG and output
+ * CRCs at words 3, 4 and 5. 64 KiB holds 2047 entries.
+ */
+#define CRC_CAPTURE_SIZE        65536
+#define CRC_CAPTURE_ENTRY_WORDS (NVC37D_NOTIFIER_CRC_CRC_ENTRY1_21 - \
+                                 NVC37D_NOTIFIER_CRC_CRC_ENTRY0_13)
+#define CRC_CAPTURE_ENTRIES     2047
+#define CRC_CAPTURE_SWITCH_AT   1024
+/* Give up waiting for DONE after this many reads (frames, roughly). */
+#define CRC_CAPTURE_SWITCH_READS 64
+
+ct_assert(NVC37D_NOTIFIER_CRC_CRC_ENTRY0_13 +
+          ((CRC_CAPTURE_ENTRIES - 1) * CRC_CAPTURE_ENTRY_WORDS) <
+          (CRC_CAPTURE_SIZE / sizeof(NvU32)));
+
+static void FreeHeadCRC32Capture(NVDevEvoPtr pDevEvo, NvU32 apiHead)
+{
+    NvU32 i;
+
+    for (i = 0; i < ARRAY_LEN(pDevEvo->crcCapture[apiHead].ctx); i++) {
+        NVEvoDmaPtr pDma = &pDevEvo->crcCapture[apiHead].ctx[i];
+
+        if (pDma->memoryHandle != 0) {
+            nvRmFreeEvoDma(pDevEvo, pDma);
+        }
+    }
+
+    nvkms_memset(&pDevEvo->crcCapture[apiHead], 0,
+                 sizeof(pDevEvo->crcCapture[apiHead]));
+}
+
+/*
+ * The core channel is going away and with it the notifier bindings and the
+ * CRC programming; nothing is written to the notifiers after this.
+ */
+static void FreeAllHeadCRC32Captures(NVDevEvoPtr pDevEvo)
+{
+    NvU32 apiHead;
+
+    for (apiHead = 0; apiHead < ARRAY_LEN(pDevEvo->crcCapture); apiHead++) {
+        if (pDevEvo->crcCapture[apiHead].enabled) {
+            FreeHeadCRC32Capture(pDevEvo, apiHead);
+        }
+    }
+}
+
+/* Arm CRC generation on the capture's hardware head into ctx[index]. */
+static NvBool ArmHeadCRC32Capture(NVDispEvoPtr pDispEvo, NvU32 apiHead,
+                                  NvU32 index)
+{
+    NVDevEvoPtr pDevEvo = pDispEvo->pDevEvo;
+    const NvU32 hwHead = pDevEvo->crcCapture[apiHead].hwHead;
+    const NVDispHeadStateEvoRec *pHeadState = &pDispEvo->headState[hwHead];
+    NVConnectorEvoPtr pConnectorEvo = pHeadState->pConnectorEvo;
+    NVEvoUpdateState updateState = { };
+
+    if ((nvGetPrimaryHwHead(pDispEvo, apiHead) != hwHead) ||
+        !nvHeadIsActive(pDispEvo, hwHead) ||
+        (pConnectorEvo == NULL)) {
+        return FALSE;
+    }
+
+    pDevEvo->hal->StartCRC32Capture(pDevEvo,
+                                    &pDevEvo->crcCapture[apiHead].ctx[index],
+                                    pConnectorEvo,
+                                    pHeadState->timings.protocol,
+                                    pConnectorEvo->or.primary,
+                                    hwHead,
+                                    &updateState);
+    nvEvoUpdateAndKickOff(pDispEvo, FALSE /* sync */, &updateState,
+                          TRUE /* releaseElv */);
+
+    return TRUE;
+}
+
+static void DisarmHeadCRC32Capture(NVDispEvoPtr pDispEvo, NvU32 apiHead,
+                                   NvBool sync)
+{
+    NVDevEvoPtr pDevEvo = pDispEvo->pDevEvo;
+    NVEvoUpdateState updateState = { };
+
+    pDevEvo->hal->StopCRC32Capture(pDevEvo,
+                                   pDevEvo->crcCapture[apiHead].hwHead,
+                                   &updateState);
+    nvEvoUpdateAndKickOff(pDispEvo, sync, &updateState, TRUE /* releaseElv */);
+}
+
+void nvStopHeadCRC32CaptureEvo(NVDispEvoPtr pDispEvo, NvU32 apiHead)
+{
+    NVDevEvoPtr pDevEvo = pDispEvo->pDevEvo;
+
+    if ((apiHead >= ARRAY_LEN(pDevEvo->crcCapture)) ||
+        !pDevEvo->crcCapture[apiHead].enabled) {
+        return;
+    }
+
+    /*
+     * Wait for the disarm to take effect before freeing the notifiers. The
+     * methods are pending in the core channel while the console owns it;
+     * they are replaced by the core init methods then.
+     */
+    if (!pDevEvo->coreInitMethodsPending) {
+        DisarmHeadCRC32Capture(pDispEvo, apiHead, TRUE /* sync */);
+    }
+
+    FreeHeadCRC32Capture(pDevEvo, apiHead);
+}
+
+NvBool nvStartHeadCRC32CaptureEvo(NVDispEvoPtr pDispEvo, NvU32 apiHead)
+{
+    NVDevEvoPtr pDevEvo = pDispEvo->pDevEvo;
+    NvU32 hwHead, i;
+
+    if ((apiHead >= ARRAY_LEN(pDevEvo->crcCapture)) ||
+        pDevEvo->displaylessHw ||
+        pDevEvo->coreInitMethodsPending) {
+        return FALSE;
+    }
+
+    /* Starting again re-targets the capture, e.g. after a modeset. */
+    nvStopHeadCRC32CaptureEvo(pDispEvo, apiHead);
+
+    hwHead = nvGetPrimaryHwHead(pDispEvo, apiHead);
+    if ((hwHead == NV_INVALID_HEAD) || !nvHeadIsActive(pDispEvo, hwHead)) {
+        return FALSE;
+    }
+
+    for (i = 0; i < ARRAY_LEN(pDevEvo->crcCapture[apiHead].ctx); i++) {
+        NVEvoDmaPtr pDma = &pDevEvo->crcCapture[apiHead].ctx[i];
+
+        if (!nvRmAllocEvoDma(pDevEvo, pDma, CRC_CAPTURE_SIZE - 1,
+                             DRF_DEF(OS03, _FLAGS, _TYPE, _NOTIFIER))) {
+            goto fail;
+        }
+
+        if (pDevEvo->hal->BindSurfaceDescriptor(pDevEvo, pDevEvo->core,
+                                                &pDma->surfaceDesc) !=
+            NVOS_STATUS_SUCCESS) {
+            goto fail;
+        }
+
+        /* An entry that is still zero hasn't been written yet. */
+        nvkms_memset(pDma->cpuAddress, 0, CRC_CAPTURE_SIZE);
+    }
+
+    pDevEvo->crcCapture[apiHead].hwHead = hwHead;
+
+    if (!ArmHeadCRC32Capture(pDispEvo, apiHead, 0)) {
+        goto fail;
+    }
+
+    pDevEvo->crcCapture[apiHead].enabled = TRUE;
+
+    return TRUE;
+
+fail:
+    nvEvoLogDev(pDevEvo, EVO_LOG_ERROR,
+                "Failed to start CRC capture on head %d", apiHead);
+    FreeHeadCRC32Capture(pDevEvo, apiHead);
+    return FALSE;
+}
+
+/*
+ * Read the entries written to ctx[cur] since the last read, up to maxEntries.
+ * Returns whether it stopped at an entry the hardware hasn't written (or the
+ * end of the notifier) rather than at maxEntries.
+ */
+static NvBool ReadHeadCRC32Entries(NVDevEvoPtr pDevEvo, NvU32 apiHead,
+                                   NvU32 source, NvU32 maxEntries,
+                                   NvU32 *pCrcs, NvU32 *pNumEntries)
+{
+    volatile const NvU32 *pNotifier =
+        pDevEvo->crcCapture[apiHead].ctx[pDevEvo->crcCapture[apiHead].cur].cpuAddress;
+    NvU32 field;
+
+    switch (source) {
+    case NVKMS_HEAD_CRC32_SOURCE_RG:
+        field = NVC37D_NOTIFIER_CRC_CRC_ENTRY0_12;
+        break;
+    case NVKMS_HEAD_CRC32_SOURCE_COMPOSITOR:
+        field = NVC37D_NOTIFIER_CRC_CRC_ENTRY0_11;
+        break;
+    case NVKMS_HEAD_CRC32_SOURCE_OUTPUT:
+    default:
+        field = NVC37D_NOTIFIER_CRC_CRC_ENTRY0_13;
+        break;
+    }
+
+    while (pDevEvo->crcCapture[apiHead].readIdx < CRC_CAPTURE_ENTRIES) {
+        const NvU32 crc =
+            pNotifier[field + (pDevEvo->crcCapture[apiHead].readIdx *
+                               CRC_CAPTURE_ENTRY_WORDS)];
+
+        if (crc == 0) {
+            return TRUE;
+        }
+
+        if (*pNumEntries == maxEntries) {
+            return FALSE;
+        }
+
+        pCrcs[(*pNumEntries)++] = crc;
+        pDevEvo->crcCapture[apiHead].readIdx++;
+    }
+
+    return TRUE;
+}
+
+NvBool nvReadHeadCRC32CaptureEvo(NVDispEvoPtr pDispEvo, NvU32 apiHead,
+                                 NvU32 source, NvU32 maxEntries,
+                                 NvU32 *pCrcs, NvU32 *pNumEntries,
+                                 NvU32 *pLostEntries)
+{
+    NVDevEvoPtr pDevEvo = pDispEvo->pDevEvo;
+
+    *pNumEntries = 0;
+    *pLostEntries = 0;
+
+    if ((apiHead >= ARRAY_LEN(pDevEvo->crcCapture)) ||
+        !pDevEvo->crcCapture[apiHead].enabled) {
+        return FALSE;
+    }
+
+    /*
+     * The core channel was set up again (e.g. after GC6) and lost the CRC
+     * programming; no updates can be sent until the next modeset.
+     */
+    if (pDevEvo->coreInitMethodsPending) {
+        return FALSE;
+    }
+
+    if (pDevEvo->crcCapture[apiHead].switching) {
+        const NvU8 cur = pDevEvo->crcCapture[apiHead].cur;
+        volatile const NvU32 *pNotifier =
+            pDevEvo->crcCapture[apiHead].ctx[cur].cpuAddress;
+        /* Read DONE first: entries read after it are final. */
+        const NvBool done =
+            FLD_TEST_DRF(C37D, _NOTIFIER_CRC_STATUS_0, _DONE, _TRUE,
+                         pNotifier[NVC37D_NOTIFIER_CRC_STATUS_0]);
+
+        if (!ReadHeadCRC32Entries(pDevEvo, apiHead, source, maxEntries,
+                                  pCrcs, pNumEntries)) {
+            return TRUE;
+        }
+
+        if (!done &&
+            (++pDevEvo->crcCapture[apiHead].switchReads <
+             CRC_CAPTURE_SWITCH_READS)) {
+            return TRUE;
+        }
+
+        nvkms_memset(pDevEvo->crcCapture[apiHead].ctx[cur].cpuAddress, 0,
+                     CRC_CAPTURE_SIZE);
+        pDevEvo->crcCapture[apiHead].cur = cur ^ 1;
+        pDevEvo->crcCapture[apiHead].readIdx = 0;
+        pDevEvo->crcCapture[apiHead].switching = FALSE;
+        pDevEvo->crcCapture[apiHead].switchReads = 0;
+        *pLostEntries = 1;
+    }
+
+    ReadHeadCRC32Entries(pDevEvo, apiHead, source, maxEntries,
+                         pCrcs, pNumEntries);
+
+    if (!pDevEvo->crcCapture[apiHead].switching &&
+        (pDevEvo->crcCapture[apiHead].readIdx >= CRC_CAPTURE_SWITCH_AT)) {
+        /* Waits for the next vblank, once every CRC_CAPTURE_SWITCH_AT frames. */
+        DisarmHeadCRC32Capture(pDispEvo, apiHead, TRUE /* sync */);
+
+        /*
+         * If the head moved or went away, the capture stays disarmed;
+         * the caller restarts it when it notices.
+         */
+        if (!ArmHeadCRC32Capture(pDispEvo, apiHead,
+                                 pDevEvo->crcCapture[apiHead].cur ^ 1)) {
+            return FALSE;
+        }
+        pDevEvo->crcCapture[apiHead].switching = TRUE;
+    }
+
+    return TRUE;
 }
 
 NvU32 nvGetActiveSorMask(const NVDispEvoRec *pDispEvo)

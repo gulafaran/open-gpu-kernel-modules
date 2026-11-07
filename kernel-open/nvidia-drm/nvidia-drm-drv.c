@@ -1157,6 +1157,14 @@ static void nv_drm_dev_unload(struct drm_device *dev)
         }
     }
 
+    {
+        struct drm_crtc *crtc;
+
+        nv_drm_for_each_crtc(crtc, dev) {
+            nv_drm_crtc_crc_teardown(to_nv_crtc(crtc));
+        }
+    }
+
     nv_drm_held_fbs_fini(nv_dev);
 
     /* Clean up mode configuration */
