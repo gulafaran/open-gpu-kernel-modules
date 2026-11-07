@@ -444,6 +444,12 @@ struct NvKmsKapiHeadModeSetConfig {
     NvU8 contentType;
 
     /*
+     * Nearest-neighbor viewport scaling (DRM CRTC SCALING_FILTER). Like the
+     * content type it doesn't need a modeset.
+     */
+    NvBool nearestScaling;
+
+    /*
      * Scale an image of sizeIn to the out rectangle within the mode's visible
      * area; the DRM "scaling mode" property. The layers are positioned in
      * sizeIn. When not enabled, both are the mode's visible size.
@@ -493,6 +499,7 @@ struct NvKmsKapiHeadRequestedConfig {
         NvBool colorFormatChanged              : 1;
         NvBool colorBpcChanged                 : 1;
         NvBool vrrEnabledChanged               : 1;
+        NvBool scalingFilterChanged            : 1;
     } flags;
 
     struct NvKmsKapiCursorRequestedConfig cursorRequestedConfig;

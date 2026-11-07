@@ -414,19 +414,49 @@ void nvInitScalerCoefficientsPrecomp5(NVEvoChannelPtr pChannel,
         DRF_NUM(C57E, _SET_INPUT_SCALER_COEFF_VALUE, _INDEX, index));
 }
 
-static void InitScalerCoefficientsPostcomp5(NVDevEvoPtr pDevEvo,
-                                            NVEvoChannelPtr pChannel,
-                                            NvU32 coeff, NvU32 index)
+/*
+ * The coefficient at (ratio, phase, coeffIdx) of the default table above or of
+ * the nearest-neighbor one. Nearest neighbor takes the center tap for every
+ * phase, which is the nearest source pixel; only the edge phase (+/-16, exactly
+ * between two source pixels) has to take both halves, since its kernel is
+ * symmetric. Integer upscaling doesn't sample there.
+ */
+NvU32 nvScalerTaps5Coeff(NvBool nearest, NvU8 ratio, NvU8 phase, NvU8 coeffIdx)
 {
-    NvU32 h;
-
-    for (h = 0; h < pDevEvo->numHeads; h++) {
-        nvDmaSetStartEvoMethod(pChannel,
-            NVC57D_HEAD_SET_OUTPUT_SCALER_COEFF_VALUE(h), 1);
-        nvDmaSetEvoMethodData(pChannel,
-            DRF_NUM(C57D, _HEAD_SET_OUTPUT_SCALER_COEFF_VALUE, _DATA, coeff) |
-            DRF_NUM(C57D, _HEAD_SET_OUTPUT_SCALER_COEFF_VALUE, _INDEX, index));
+    if (nearest) {
+        /* Row 0 holds (c0, c1) of phase 0, then (c0, c1) of phase 16. */
+        return ((phase == 0) && (coeffIdx == 3)) ? 128 : 0;
     }
+
+    return scalerTaps5Coeff[ratio][phase][coeffIdx];
+}
+
+/*
+ * Load a head's postcomp scaler coefficients. They take effect with the next
+ * core channel update.
+ */
+static void LoadScalerCoefficientsPostcomp5(NVDevEvoPtr pDevEvo,
+                                            NVEvoChannelPtr pChannel,
+                                            NvU32 head, NvBool nearest)
+{
+    NvU8 ratio, phase, coeffIdx;
+
+    for (ratio = 0; ratio < NUM_SCALER_RATIOS; ratio++) {
+        for (phase = 0; phase < NUM_TAPS5_COEFF_PHASES; phase++) {
+            for (coeffIdx = 0; coeffIdx < NUM_TAPS5_COEFF_VALUES; coeffIdx++) {
+                NvU32 coeff = nvScalerTaps5Coeff(nearest, ratio, phase, coeffIdx);
+                NvU32 index = ratio << 6 | phase << 2 | coeffIdx;
+
+                nvDmaSetStartEvoMethod(pChannel,
+                    NVC57D_HEAD_SET_OUTPUT_SCALER_COEFF_VALUE(head), 1);
+                nvDmaSetEvoMethodData(pChannel,
+                    DRF_NUM(C57D, _HEAD_SET_OUTPUT_SCALER_COEFF_VALUE, _DATA, coeff) |
+                    DRF_NUM(C57D, _HEAD_SET_OUTPUT_SCALER_COEFF_VALUE, _INDEX, index));
+            }
+        }
+    }
+
+    pDevEvo->nearestScaling.head[head] = nearest;
 }
 
 static void InitTaps5ScalerCoefficientsC5(NVDevEvoPtr pDevEvo,
@@ -443,6 +473,13 @@ static void InitTaps5ScalerCoefficientsC5(NVDevEvoPtr pDevEvo,
         if (!pScalerCaps->present) {
             return;
         }
+    } else {
+        NvU32 head;
+
+        for (head = 0; head < pDevEvo->numHeads; head++) {
+            LoadScalerCoefficientsPostcomp5(pDevEvo, pChannel, head, FALSE);
+        }
+        return;
     }
 
     for (ratio = 0; ratio < NUM_SCALER_RATIOS; ratio++) {
@@ -453,12 +490,7 @@ static void InitTaps5ScalerCoefficientsC5(NVDevEvoPtr pDevEvo,
                 NvU32 coeff = scalerTaps5Coeff[ratio][phase][coeffIdx];
                 NvU32 index = ratio << 6 | phase << 2 | coeffIdx;
 
-                if (isPrecomp) {
-                    nvInitScalerCoefficientsPrecomp5(pChannel, coeff, index);
-                } else {
-                    InitScalerCoefficientsPostcomp5(pDevEvo,
-                                                    pChannel, coeff, index);
-                }
+                nvInitScalerCoefficientsPrecomp5(pChannel, coeff, index);
             }
         }
     }
@@ -5930,7 +5962,14 @@ static void EvoSetOutputScalerC3(const NVDispEvoRec *pDispEvo, const NvU32 head,
     NvU32 vTaps = pViewPort->vTaps > NV_EVO_SCALER_2TAPS ?
                     NVC37D_HEAD_SET_CONTROL_OUTPUT_SCALER_VERTICAL_TAPS_TAPS_5 :
                     NVC37D_HEAD_SET_CONTROL_OUTPUT_SCALER_VERTICAL_TAPS_TAPS_2;
-    NvU32 hTaps = pViewPort->hTaps > NV_EVO_SCALER_2TAPS ?
+    /*
+     * The 2-tap mode filters with fixed bilinear weights, only the 5-tap mode
+     * uses the coefficient table; so nearest neighbor needs 5 horizontal taps.
+     * Horizontal taps aren't limited like vertical ones (no line store) and
+     * IMP doesn't depend on them.
+     */
+    NvU32 hTaps = ((pViewPort->hTaps > NV_EVO_SCALER_2TAPS) ||
+                   pViewPort->nearestScaling) ?
                     NVC37D_HEAD_SET_CONTROL_OUTPUT_SCALER_HORIZONTAL_TAPS_TAPS_5 :
                     NVC37D_HEAD_SET_CONTROL_OUTPUT_SCALER_HORIZONTAL_TAPS_TAPS_2;
 
@@ -5938,6 +5977,11 @@ static void EvoSetOutputScalerC3(const NVDispEvoRec *pDispEvo, const NvU32 head,
     nvDmaSetEvoMethodData(pChannel,
         DRF_NUM(C37D, _HEAD_SET_CONTROL_OUTPUT_SCALER, _VERTICAL_TAPS, vTaps) |
         DRF_NUM(C37D, _HEAD_SET_CONTROL_OUTPUT_SCALER, _HORIZONTAL_TAPS, hTaps));
+
+    if (pDevEvo->nearestScaling.head[head] != pViewPort->nearestScaling) {
+        LoadScalerCoefficientsPostcomp5(pDevEvo, pChannel, head,
+                                        pViewPort->nearestScaling);
+    }
 }
 
 static NvBool EvoSetViewportInOut3(NVDevEvoPtr pDevEvo, const int head,

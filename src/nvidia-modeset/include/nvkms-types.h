@@ -1378,6 +1378,18 @@ typedef struct _NVEvoDevRec {
         NvBool enabled;
         NvBool switching; /* ctx[cur] is being released for ctx[cur ^ 1] */
     } crcCapture[NVKMS_MAX_HEADS_PER_DISP];
+
+    /*
+     * Nearest-neighbor viewport (postcomp) scaling, see
+     * NVKMS_IOCTL_SET_SCALING_FILTER. 'requested' is indexed by apiHead on
+     * disp 0 and copied into the viewport of the head's hardware heads by
+     * modesets; 'head' says which coefficient table each hardware head's
+     * postcomp scaler has loaded.
+     */
+    struct {
+        NvBool requested[NVKMS_MAX_HEADS_PER_DISP];
+        NvBool head[NV_MAX_HEADS];
+    } nearestScaling;
 } NVDevEvoRec;
 
 /*
@@ -1408,6 +1420,9 @@ typedef struct _NVHwModeViewPortEvo {
 
     NVEvoScalerTaps hTaps;
     NVEvoScalerTaps vTaps;
+
+    /* Scale with the nearest-neighbor coefficient table. */
+    NvBool nearestScaling;
 
     // These are the window features that may be possible if the required ISO
     // bw is available at the time that the feature needs to be enabled. By

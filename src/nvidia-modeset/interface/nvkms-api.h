@@ -274,6 +274,7 @@ enum NvKmsIoctlCommand {
     NVKMS_IOCTL_MST_I2C_TRANSFER,
     NVKMS_IOCTL_QUERY_HEAD_RASTER,
     NVKMS_IOCTL_HEAD_CRC32_CAPTURE,
+    NVKMS_IOCTL_SET_SCALING_FILTER,
 };
 
 
@@ -4657,6 +4658,36 @@ struct NvKmsHeadCRC32CaptureReply {
 struct NvKmsHeadCRC32CaptureParams {
     struct NvKmsHeadCRC32CaptureRequest request; /*! in */
     struct NvKmsHeadCRC32CaptureReply reply;     /*! out */
+};
+
+/*!
+ * NVKMS_IOCTL_SET_SCALING_FILTER:
+ *
+ * Choose between the default (5-tap) filter and nearest neighbor for the
+ * head's postcomp scaler, which scales the viewport (viewPortIn to
+ * viewPortOut). It takes effect right away if the head is active, else with
+ * its next modeset, and is kept across modesets.
+ *
+ * Window (precomp) scaling isn't covered: NVKMS only uses it on display
+ * hardware without postcomp scalers.
+ *
+ * This IOCTL can only be used by kernel-mode clients.
+ */
+
+struct NvKmsSetScalingFilterRequest {
+    NvKmsDeviceHandle deviceHandle;
+    NvKmsDispHandle dispHandle;
+    NvU32 head;
+    NvBool nearest;
+};
+
+struct NvKmsSetScalingFilterReply {
+    NvU32 padding;
+};
+
+struct NvKmsSetScalingFilterParams {
+    struct NvKmsSetScalingFilterRequest request; /*! in */
+    struct NvKmsSetScalingFilterReply reply;     /*! out */
 };
 
 /*!
