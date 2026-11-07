@@ -5636,6 +5636,26 @@ compile_test() {
             compile_check_conftest "$CODE" "NV_DRM_CRTC_FUNCS_HAS_GET_VBLANK_TIMESTAMP" "" "types"
         ;;
 
+        drm_crtc_funcs_has_get_crc_sources)
+            #
+            # Determine if the 'drm_crtc_funcs' structure has the
+            # 'verify_crc_source' and 'get_crc_sources' fields.
+            #
+            # Added by commits c0811a7d5bef ("drm/crc: Cleanup crtc_crc_open
+            # function") and 4396551e9cf3 ("drm: crc: Introduce
+            # get_crc_sources callback") in v4.19
+            #
+            CODE="
+            #include <drm/drm_crtc.h>
+
+            int conftest_drm_crtc_funcs_has_get_crc_sources(void) {
+                return offsetof(struct drm_crtc_funcs, verify_crc_source) +
+                       offsetof(struct drm_crtc_funcs, get_crc_sources);
+            }"
+
+            compile_check_conftest "$CODE" "NV_DRM_CRTC_FUNCS_HAS_GET_CRC_SOURCES" "" "types"
+        ;;
+
         pfn_is_map_memory)
             #
             # Determine if pfn_is_map_memory() function is present.

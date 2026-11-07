@@ -4666,6 +4666,51 @@ static NvBool GetHeadRaster(struct NvKmsKapiDevice *device,
     return NV_TRUE;
 }
 
+ct_assert(NVKMS_KAPI_CRC32_CAPTURE_START == NVKMS_HEAD_CRC32_CAPTURE_START);
+ct_assert(NVKMS_KAPI_CRC32_CAPTURE_STOP == NVKMS_HEAD_CRC32_CAPTURE_STOP);
+ct_assert(NVKMS_KAPI_CRC32_CAPTURE_READ == NVKMS_HEAD_CRC32_CAPTURE_READ);
+ct_assert(NVKMS_KAPI_CRC32_SOURCE_OUTPUT == NVKMS_HEAD_CRC32_SOURCE_OUTPUT);
+ct_assert(NVKMS_KAPI_CRC32_SOURCE_RG == NVKMS_HEAD_CRC32_SOURCE_RG);
+ct_assert(NVKMS_KAPI_CRC32_SOURCE_COMPOSITOR ==
+          NVKMS_HEAD_CRC32_SOURCE_COMPOSITOR);
+ct_assert(NVKMS_KAPI_CRC32_MAX_ENTRIES == NVKMS_HEAD_CRC32_MAX_ENTRIES);
+
+static NvBool HeadCrc32Capture(struct NvKmsKapiDevice *device,
+                               NvU32 head,
+                               NvU32 op,
+                               NvU32 source,
+                               NvU32 *pCrcs,
+                               NvU32 *pNumEntries,
+                               NvU32 *pLostEntries)
+{
+    struct NvKmsHeadCRC32CaptureParams params = { };
+
+    if (device->hKmsDevice == 0x0) {
+        return NV_FALSE;
+    }
+
+    params.request.deviceHandle = device->hKmsDevice;
+    params.request.dispHandle = device->hKmsDisp;
+    params.request.head = head;
+    params.request.op = op;
+    params.request.source = source;
+
+    if (!nvkms_ioctl_from_kapi(device->pKmsOpen,
+                               NVKMS_IOCTL_HEAD_CRC32_CAPTURE,
+                               &params, sizeof(params))) {
+        return NV_FALSE;
+    }
+
+    if (op == NVKMS_KAPI_CRC32_CAPTURE_READ) {
+        nvkms_memcpy(pCrcs, params.reply.crc32,
+                     params.reply.numEntries * sizeof(pCrcs[0]));
+        *pNumEntries = params.reply.numEntries;
+        *pLostEntries = params.reply.lostEntries;
+    }
+
+    return NV_TRUE;
+}
+
 static void UnregisterVblankIntrCallback(
     struct NvKmsKapiDevice *device,
     const NvU32 head,
@@ -4842,6 +4887,7 @@ NvBool nvKmsKapiGetFunctionsTableInternal
     funcsTable->getDisplayFrlLinkFailed = GetDisplayFrlLinkFailed;
 
     funcsTable->getHeadRaster = GetHeadRaster;
+    funcsTable->headCrc32Capture = HeadCrc32Capture;
 
     return NV_TRUE;
 }

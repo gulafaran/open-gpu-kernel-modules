@@ -184,6 +184,24 @@ struct nv_drm_crtc {
 
     struct NvKmsLUTCaps olut_caps;
 
+#if defined(NV_DRM_CRTC_FUNCS_HAS_GET_CRC_SOURCES)
+    /*
+     * Per-frame CRCs for DRM's crc debugfs files, see
+     * nv_drm_crtc_set_crc_source(). @lock serializes the NVKMS calls and
+     * protects the rest; @source is also read without it, from the vblank
+     * callback.
+     */
+    struct {
+        struct mutex lock;
+        struct work_struct work;
+        int source;             /* index into the source names, -1 = off */
+        bool running;           /* the NVKMS capture is armed */
+        bool restart;           /* start it (again) before reading */
+        unsigned long retry_at; /* jiffies, after a failed start */
+        u32 frame;              /* DRM frame number of the next CRC */
+    } crc;
+#endif
+
     struct drm_crtc base;
 };
 
@@ -499,6 +517,14 @@ void nv_drm_crtc_set_vblank_duration(struct nv_drm_crtc *nv_crtc,
                                      const struct drm_crtc_state *crtc_state);
 
 void nv_drm_crtc_vblank_teardown(struct nv_drm_crtc *nv_crtc);
+
+#if defined(NV_DRM_CRTC_FUNCS_HAS_GET_CRC_SOURCES)
+void nv_drm_crtc_crc_modeset(struct nv_drm_crtc *nv_crtc);
+void nv_drm_crtc_crc_teardown(struct nv_drm_crtc *nv_crtc);
+#else
+static inline void nv_drm_crtc_crc_modeset(struct nv_drm_crtc *nv_crtc) { }
+static inline void nv_drm_crtc_crc_teardown(struct nv_drm_crtc *nv_crtc) { }
+#endif
 
 /*
  * CRTCs are static objects, list does not change once after initialization and

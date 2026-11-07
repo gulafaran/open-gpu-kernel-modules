@@ -1248,13 +1248,8 @@ static void EvoStartHeadCRC32CaptureC9(NVDevEvoPtr pDevEvo,
                                        NvU32 head,
                                        NVEvoUpdateState *updateState)
 {
-    const NvU32 winChannel = head << 1;
     NVEvoChannelPtr pChannel = pDevEvo->core;
     NvU32 orOutput = 0;
-
-    /* The window channel should fit in
-     * NVC97D_HEAD_SET_CRC_CONTROL_CONTROLLING_CHANNEL */
-    nvAssert(winChannel < DRF_MASK(NVC97D_HEAD_SET_CRC_CONTROL_CONTROLLING_CHANNEL));
 
     nvUpdateUpdateState(pDevEvo, updateState, pChannel);
 
@@ -1283,7 +1278,8 @@ static void EvoStartHeadCRC32CaptureC9(NVDevEvoPtr pDevEvo,
     nvDmaSetEvoMethodData(pChannel,
         DRF_NUM(C97D, _HEAD_SET_CRC_CONTROL, _PRIMARY_CRC, orOutput) |
         DRF_DEF(C97D, _HEAD_SET_CRC_CONTROL, _SECONDARY_CRC, _NONE) |
-        DRF_NUM(C97D, _HEAD_SET_CRC_CONTROL, _CONTROLLING_CHANNEL, winChannel) |
+        /* The core channel, see EvoStartHeadCRC32CaptureC3(). */
+        DRF_DEF(C97D, _HEAD_SET_CRC_CONTROL, _CONTROLLING_CHANNEL, _CORE) |
         DRF_DEF(C97D, _HEAD_SET_CRC_CONTROL, _EXPECT_BUFFER_COLLAPSE, _FALSE) |
         DRF_DEF(C97D, _HEAD_SET_CRC_CONTROL, _CRC_DURING_SNOOZE, _DISABLE));
 

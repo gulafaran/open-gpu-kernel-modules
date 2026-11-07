@@ -52,6 +52,8 @@
 #include <drm/drm_vblank.h>
 
 #include <linux/io.h>
+#include <linux/string.h> /* match_string */
+#include <linux/workqueue.h>
 #include <linux/pci.h>
 
 /**
@@ -2850,6 +2852,239 @@ static bool nv_drm_crtc_get_vblank_timestamp(
 }
 #endif
 
+#if defined(NV_DRM_CRTC_FUNCS_HAS_GET_CRC_SOURCES)
+/*
+ * Per-frame CRCs for DRM's debugfs crtc-N/crc files, as used by IGT. NVKMS
+ * has the hardware write a CRC for every frame into notifier memory; a work
+ * item queued from the vblank callback reads the new ones and hands them to
+ * DRM.
+ *
+ * The hardware doesn't say which frame a CRC is for. Number them from the
+ * vblank count when the capture started, counting the frames NVKMS reports
+ * lost, and never higher than the last finished frame: a number that is too
+ * low only makes IGT wait for one more CRC, one that is too high would give
+ * it the CRC of an older frame.
+ *
+ * "auto" is the CRC of the output resource (SOR/SF, after DSC if enabled),
+ * "rg" of the raster generator and "comp" of the composited image.
+ */
+static const char *const nv_drm_crc_sources[] = {
+    "auto",
+    "rg",
+    "comp",
+};
+
+static const NvU32 nv_drm_crc_kapi_sources[] = {
+    NVKMS_KAPI_CRC32_SOURCE_OUTPUT,
+    NVKMS_KAPI_CRC32_SOURCE_RG,
+    NVKMS_KAPI_CRC32_SOURCE_COMPOSITOR,
+};
+
+static int nv_drm_crtc_crc_parse_source(const char *name)
+{
+    return match_string(nv_drm_crc_sources, ARRAY_SIZE(nv_drm_crc_sources),
+                        name);
+}
+
+static int nv_drm_crtc_verify_crc_source(struct drm_crtc *crtc,
+                                         const char *source,
+                                         size_t *values_cnt)
+{
+    if ((source != NULL) && (nv_drm_crtc_crc_parse_source(source) < 0)) {
+        return -EINVAL;
+    }
+
+    *values_cnt = 1;
+    return 0;
+}
+
+static const char *const *nv_drm_crtc_get_crc_sources(struct drm_crtc *crtc,
+                                                      size_t *count)
+{
+    *count = ARRAY_SIZE(nv_drm_crc_sources);
+    return nv_drm_crc_sources;
+}
+
+/* Called with crc.lock held. */
+static bool __nv_drm_crtc_crc_start(struct nv_drm_crtc *nv_crtc)
+{
+    struct nv_drm_device *nv_dev = to_nv_device(nv_crtc->base.dev);
+    NvU32 numEntries, lostEntries;
+
+    nv_crtc->crc.running =
+        nvKms->headCrc32Capture(nv_dev->pDevice, nv_crtc->head,
+                                NVKMS_KAPI_CRC32_CAPTURE_START, 0,
+                                NULL, &numEntries, &lostEntries);
+    nv_crtc->crc.restart = !nv_crtc->crc.running;
+    nv_crtc->crc.retry_at = jiffies + HZ;
+    nv_crtc->crc.frame = (u32)drm_crtc_vblank_count(&nv_crtc->base);
+
+    return nv_crtc->crc.running;
+}
+
+/* Called with crc.lock held. */
+static void __nv_drm_crtc_crc_stop(struct nv_drm_crtc *nv_crtc)
+{
+    struct nv_drm_device *nv_dev = to_nv_device(nv_crtc->base.dev);
+    NvU32 numEntries, lostEntries;
+
+    if (nv_crtc->crc.running) {
+        nvKms->headCrc32Capture(nv_dev->pDevice, nv_crtc->head,
+                                NVKMS_KAPI_CRC32_CAPTURE_STOP, 0,
+                                NULL, &numEntries, &lostEntries);
+    }
+    nv_crtc->crc.running = false;
+    nv_crtc->crc.restart = false;
+}
+
+static void nv_drm_crtc_crc_work(struct work_struct *work)
+{
+    struct nv_drm_crtc *nv_crtc =
+        container_of(work, struct nv_drm_crtc, crc.work);
+    struct drm_crtc *crtc = &nv_crtc->base;
+    struct nv_drm_device *nv_dev = to_nv_device(crtc->dev);
+    NvU32 crcs[NVKMS_KAPI_CRC32_MAX_ENTRIES];
+    NvU32 numEntries, lostEntries, i;
+
+    mutex_lock(&nv_crtc->crc.lock);
+
+    if (nv_crtc->crc.source < 0) {
+        goto done;
+    }
+
+    if (nv_crtc->crc.restart) {
+        if (time_before(jiffies, nv_crtc->crc.retry_at) ||
+            !__nv_drm_crtc_crc_start(nv_crtc)) {
+            goto done;
+        }
+    }
+
+    do {
+        u32 count;
+
+        if (!nvKms->headCrc32Capture(nv_dev->pDevice, nv_crtc->head,
+                                     NVKMS_KAPI_CRC32_CAPTURE_READ,
+                                     nv_drm_crc_kapi_sources[nv_crtc->crc.source],
+                                     crcs, &numEntries, &lostEntries)) {
+            /* Stopped by NVKMS (e.g. suspend) or the head moved. */
+            nv_crtc->crc.running = false;
+            nv_crtc->crc.restart = true;
+            nv_crtc->crc.retry_at = jiffies;
+            break;
+        }
+
+        nv_crtc->crc.frame += lostEntries;
+
+        /* The frame numbered 'count' is still being scanned out. */
+        count = (u32)drm_crtc_vblank_count(crtc);
+        if ((numEntries > 0) &&
+            ((s32)(nv_crtc->crc.frame + numEntries - count) > 0)) {
+            nv_crtc->crc.frame = count - numEntries;
+        }
+
+        for (i = 0; i < numEntries; i++) {
+            drm_crtc_add_crc_entry(crtc, true, nv_crtc->crc.frame++,
+                                   &crcs[i]);
+        }
+    } while (numEntries == NVKMS_KAPI_CRC32_MAX_ENTRIES);
+
+done:
+    mutex_unlock(&nv_crtc->crc.lock);
+}
+
+/*
+ * DRM calls this when the crc/data file is opened, with the source written
+ * to crc/control, and with NULL when it is closed.
+ */
+static int nv_drm_crtc_set_crc_source(struct drm_crtc *crtc, const char *name)
+{
+    struct nv_drm_crtc *nv_crtc = to_nv_crtc(crtc);
+    int source = -1;
+    bool stopped = false;
+    int ret = 0;
+
+    if (name != NULL) {
+        source = nv_drm_crtc_crc_parse_source(name);
+        if (source < 0) {
+            return -EINVAL;
+        }
+    }
+
+    mutex_lock(&nv_crtc->crc.lock);
+
+    if ((source >= 0) && (nv_crtc->crc.source < 0)) {
+        /* CRCs are read on vblank callbacks. */
+        ret = drm_crtc_vblank_get(crtc);
+        if (ret != 0) {
+            goto unlock;
+        }
+
+        if (!__nv_drm_crtc_crc_start(nv_crtc)) {
+            drm_crtc_vblank_put(crtc);
+            ret = -EIO;
+            goto unlock;
+        }
+    } else if ((source < 0) && (nv_crtc->crc.source >= 0)) {
+        __nv_drm_crtc_crc_stop(nv_crtc);
+        stopped = true;
+    }
+
+    WRITE_ONCE(nv_crtc->crc.source, source);
+
+unlock:
+    mutex_unlock(&nv_crtc->crc.lock);
+
+    if (stopped) {
+        /* A work queued before the source was cleared does nothing. */
+        cancel_work_sync(&nv_crtc->crc.work);
+        drm_crtc_vblank_put(crtc);
+    }
+
+    return ret;
+}
+
+/*
+ * The capture stays on the hardware head it was armed on; after a modeset
+ * the CRTC may be on another one, start it again.
+ */
+void nv_drm_crtc_crc_modeset(struct nv_drm_crtc *nv_crtc)
+{
+    if (READ_ONCE(nv_crtc->crc.source) < 0) {
+        return;
+    }
+
+    mutex_lock(&nv_crtc->crc.lock);
+    if (nv_crtc->crc.source >= 0) {
+        nv_crtc->crc.restart = true;
+        nv_crtc->crc.retry_at = jiffies;
+    }
+    mutex_unlock(&nv_crtc->crc.lock);
+}
+
+/*
+ * Stop a capture still running at device teardown, while NVKMS is still
+ * there. Call after the vblank callback is unregistered.
+ */
+void nv_drm_crtc_crc_teardown(struct nv_drm_crtc *nv_crtc)
+{
+    bool stopped = false;
+
+    mutex_lock(&nv_crtc->crc.lock);
+    if (nv_crtc->crc.source >= 0) {
+        __nv_drm_crtc_crc_stop(nv_crtc);
+        WRITE_ONCE(nv_crtc->crc.source, -1);
+        stopped = true;
+    }
+    mutex_unlock(&nv_crtc->crc.lock);
+
+    cancel_work_sync(&nv_crtc->crc.work);
+
+    if (stopped) {
+        drm_crtc_vblank_put(&nv_crtc->base);
+    }
+}
+#endif /* NV_DRM_CRTC_FUNCS_HAS_GET_CRC_SOURCES */
+
 static struct drm_crtc_funcs nv_crtc_funcs = {
     .set_config             = drm_atomic_helper_set_config,
     .page_flip              = drm_atomic_helper_page_flip,
@@ -2871,6 +3106,11 @@ static struct drm_crtc_funcs nv_crtc_funcs = {
 #if defined(NV_DRM_CRTC_FUNCS_HAS_GET_VBLANK_TIMESTAMP)
     .get_vblank_counter = nv_drm_crtc_get_vblank_counter,
     .get_vblank_timestamp = nv_drm_crtc_get_vblank_timestamp,
+#endif
+#if defined(NV_DRM_CRTC_FUNCS_HAS_GET_CRC_SOURCES)
+    .set_crc_source = nv_drm_crtc_set_crc_source,
+    .verify_crc_source = nv_drm_crtc_verify_crc_source,
+    .get_crc_sources = nv_drm_crtc_get_crc_sources,
 #endif
 };
 
@@ -4324,6 +4564,12 @@ static void nv_drm_crtc_vblank_callback(NvU64 param1, NvU64 param2)
         __nv_drm_crtc_vblank_handled(nv_crtc, param2);
     }
 #endif
+
+#if defined(NV_DRM_CRTC_FUNCS_HAS_GET_CRC_SOURCES)
+    if (READ_ONCE(nv_crtc->crc.source) >= 0) {
+        schedule_work(&nv_crtc->crc.work);
+    }
+#endif
 }
 
 static void nv_drm_vblank_enable_fn(void *t)
@@ -4439,6 +4685,12 @@ static struct drm_crtc *__nv_drm_crtc_create(struct nv_drm_device *nv_dev,
     spin_lock_init(&nv_crtc->flip_list_lock);
     mutex_init(&nv_crtc->vblank_q_lock);
     nv_crtc->modeset_permission_filep = NULL;
+
+#if defined(NV_DRM_CRTC_FUNCS_HAS_GET_CRC_SOURCES)
+    mutex_init(&nv_crtc->crc.lock);
+    INIT_WORK(&nv_crtc->crc.work, nv_drm_crtc_crc_work);
+    nv_crtc->crc.source = -1;
+#endif
 
     nv_drm_workthread_work_init(&nv_crtc->disable_vblank_work, nv_drm_vblank_disable_fn, nv_crtc);
     nv_drm_workthread_work_init(&nv_crtc->enable_vblank_work, nv_drm_vblank_enable_fn, nv_crtc);
