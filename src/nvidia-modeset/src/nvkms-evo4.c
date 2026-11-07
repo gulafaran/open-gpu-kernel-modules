@@ -105,19 +105,29 @@ static void GetSurfaceAddress(const NVDevEvoRec *pDevEvo,
     *pEnable = TRUE;
 }
 
-static void InitScalerCoefficientsPostcomp9(NVDevEvoPtr pDevEvo,
+/* See LoadScalerCoefficientsPostcomp5(). */
+static void LoadScalerCoefficientsPostcomp9(NVDevEvoPtr pDevEvo,
                                             NVEvoChannelPtr pChannel,
-                                            NvU32 coeff, NvU32 index)
+                                            NvU32 head, NvBool nearest)
 {
-    NvU32 h;
+    NvU8 ratio, phase, coeffIdx;
 
-    for (h = 0; h < pDevEvo->numHeads; h++) {
-        nvDmaSetStartEvoMethod(pChannel,
-            NVC97D_HEAD_SET_OUTPUT_SCALER_COEFF_VALUE(h), 1);
-        nvDmaSetEvoMethodData(pChannel,
-            DRF_NUM(C97D, _HEAD_SET_OUTPUT_SCALER_COEFF_VALUE, _DATA, coeff) |
-            DRF_NUM(C97D, _HEAD_SET_OUTPUT_SCALER_COEFF_VALUE, _INDEX, index));
+    for (ratio = 0; ratio < NUM_SCALER_RATIOS; ratio++) {
+        for (phase = 0; phase < NUM_TAPS5_COEFF_PHASES; phase++) {
+            for (coeffIdx = 0; coeffIdx < NUM_TAPS5_COEFF_VALUES; coeffIdx++) {
+                NvU32 coeff = nvScalerTaps5Coeff(nearest, ratio, phase, coeffIdx);
+                NvU32 index = ratio << 6 | phase << 2 | coeffIdx;
+
+                nvDmaSetStartEvoMethod(pChannel,
+                    NVC97D_HEAD_SET_OUTPUT_SCALER_COEFF_VALUE(head), 1);
+                nvDmaSetEvoMethodData(pChannel,
+                    DRF_NUM(C97D, _HEAD_SET_OUTPUT_SCALER_COEFF_VALUE, _DATA, coeff) |
+                    DRF_NUM(C97D, _HEAD_SET_OUTPUT_SCALER_COEFF_VALUE, _INDEX, index));
+            }
+        }
     }
+
+    pDevEvo->nearestScaling.head[head] = nearest;
 }
 
 static void InitTaps5ScalerCoefficientsC9(NVDevEvoPtr pDevEvo,
@@ -134,6 +144,13 @@ static void InitTaps5ScalerCoefficientsC9(NVDevEvoPtr pDevEvo,
         if (!pScalerCaps->present) {
             return;
         }
+    } else {
+        NvU32 head;
+
+        for (head = 0; head < pDevEvo->numHeads; head++) {
+            LoadScalerCoefficientsPostcomp9(pDevEvo, pChannel, head, FALSE);
+        }
+        return;
     }
 
     for (ratio = 0; ratio < NUM_SCALER_RATIOS; ratio++) {
@@ -144,12 +161,7 @@ static void InitTaps5ScalerCoefficientsC9(NVDevEvoPtr pDevEvo,
                 NvU32 coeff = scalerTaps5Coeff[ratio][phase][coeffIdx];
                 NvU32 index = ratio << 6 | phase << 2 | coeffIdx;
 
-                if (isPrecomp) {
-                    nvInitScalerCoefficientsPrecomp5(pChannel, coeff, index);
-                } else {
-                    InitScalerCoefficientsPostcomp9(pDevEvo,
-                                                    pChannel, coeff, index);
-                }
+                nvInitScalerCoefficientsPrecomp5(pChannel, coeff, index);
             }
         }
     }
@@ -779,7 +791,9 @@ static void EvoSetOutputScalerC9(const NVDispEvoRec *pDispEvo, const NvU32 head,
     NvU32 vTaps = pViewPort->vTaps > NV_EVO_SCALER_2TAPS ?
                     NVC97D_HEAD_SET_CONTROL_OUTPUT_SCALER_VERTICAL_TAPS_TAPS_5 :
                     NVC97D_HEAD_SET_CONTROL_OUTPUT_SCALER_VERTICAL_TAPS_TAPS_2;
-    NvU32 hTaps = pViewPort->hTaps > NV_EVO_SCALER_2TAPS ?
+    /* Nearest neighbor needs 5 taps, see EvoSetOutputScalerC3(). */
+    NvU32 hTaps = ((pViewPort->hTaps > NV_EVO_SCALER_2TAPS) ||
+                   pViewPort->nearestScaling) ?
                     NVC97D_HEAD_SET_CONTROL_OUTPUT_SCALER_HORIZONTAL_TAPS_TAPS_5 :
                     NVC97D_HEAD_SET_CONTROL_OUTPUT_SCALER_HORIZONTAL_TAPS_TAPS_2;
 
@@ -787,6 +801,11 @@ static void EvoSetOutputScalerC9(const NVDispEvoRec *pDispEvo, const NvU32 head,
     nvDmaSetEvoMethodData(pChannel,
         DRF_NUM(C97D, _HEAD_SET_CONTROL_OUTPUT_SCALER, _VERTICAL_TAPS, vTaps) |
         DRF_NUM(C97D, _HEAD_SET_CONTROL_OUTPUT_SCALER, _HORIZONTAL_TAPS, hTaps));
+
+    if (pDevEvo->nearestScaling.head[head] != pViewPort->nearestScaling) {
+        LoadScalerCoefficientsPostcomp9(pDevEvo, pChannel, head,
+                                        pViewPort->nearestScaling);
+    }
 }
 
 /*

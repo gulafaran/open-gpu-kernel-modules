@@ -49,6 +49,7 @@ NV_CONFTEST_FUNCTION_COMPILE_TESTS += pin_user_pages
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += drm_driver_has_gem_prime_res_obj
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += drm_connector_funcs_have_mode_in_name
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += drm_connector_has_vrr_capable_property
+NV_CONFTEST_FUNCTION_COMPILE_TESTS += drm_crtc_create_scaling_filter_property
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += vmf_insert_pfn
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += drm_connector_for_each_possible_encoder
 NV_CONFTEST_FUNCTION_COMPILE_TESTS += drm_gem_object_put_unlocked

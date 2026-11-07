@@ -3211,6 +3211,14 @@ static int nv_drm_crtc_atomic_check(struct drm_crtc *crtc,
         old_crtc_state->vrr_enabled != crtc_state->vrr_enabled;
 #endif
 
+#if defined(NV_DRM_CRTC_CREATE_SCALING_FILTER_PROPERTY_PRESENT)
+    /* The viewport scaler, used by the "scaling mode" connector property. */
+    req_config->modeSetConfig.nearestScaling =
+        crtc_state->scaling_filter == DRM_SCALING_FILTER_NEAREST_NEIGHBOR;
+    req_config->flags.scalingFilterChanged =
+        old_crtc_state->scaling_filter != crtc_state->scaling_filter;
+#endif
+
     if (nv_crtc_state->regamma_changed || crtc_state->color_mgmt_changed) {
         if (nv_crtc_state->regamma_drm_lut_surface != NULL) {
             kref_put(&nv_crtc_state->regamma_drm_lut_surface->base.refcount,
@@ -4714,6 +4722,17 @@ static struct drm_crtc *__nv_drm_crtc_create(struct nv_drm_device *nv_dev,
     nv_crtc->olut_caps = pResInfo->lutCaps.olut;
 
     nv_drm_crtc_install_properties(&nv_crtc->base);
+
+#if defined(NV_DRM_CRTC_CREATE_SCALING_FILTER_PROPERTY_PRESENT)
+    /*
+     * Only on the CRTC: NVKMS scales planes only on display hardware without
+     * a postcomp (viewport) scaler, so no plane can scale where this applies.
+     */
+    drm_crtc_create_scaling_filter_property(
+        &nv_crtc->base,
+        BIT(DRM_SCALING_FILTER_DEFAULT) |
+        BIT(DRM_SCALING_FILTER_NEAREST_NEIGHBOR));
+#endif
 
     drm_crtc_enable_color_mgmt(&nv_crtc->base, NVKMS_LUT_ARRAY_SIZE, true,
                                NVKMS_LUT_ARRAY_SIZE);

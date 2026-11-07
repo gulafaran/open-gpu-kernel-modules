@@ -207,6 +207,8 @@ void nvEvoWaitForCompNotifierC3(const NVDispEvoRec *pDispEvo, int idx);
 
 void nvEvoInitChannel3(NVDevEvoPtr pDevEvo, NVEvoChannelPtr pChannel);
 
+NvU32 nvScalerTaps5Coeff(NvBool nearest, NvU8 ratio, NvU8 phase,
+                         NvU8 coeffIdx);
 void nvInitScalerCoefficientsPrecomp5(NVEvoChannelPtr pChannel,
                                            NvU32 coeff, NvU32 index);
 

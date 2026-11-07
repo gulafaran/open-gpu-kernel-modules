@@ -4977,6 +4977,57 @@ static NvBool QueryHeadRaster(struct NvKmsPerOpen *pOpen,
     return TRUE;
 }
 
+static NvBool SetScalingFilter(struct NvKmsPerOpen *pOpen,
+                               void *pParamsVoid)
+{
+    struct NvKmsSetScalingFilterParams *pParams = pParamsVoid;
+    NVDispEvoPtr pDispEvo = GetDispEvo(pOpen, pParams->request.deviceHandle);
+    const NvU32 apiHead = pParams->request.head;
+    const NvBool nearest = pParams->request.nearest ? TRUE : FALSE;
+    NVEvoUpdateState updateState = { };
+    NVDevEvoPtr pDevEvo;
+    NvBool changed = FALSE;
+    NvU32 head;
+
+    if (pDispEvo == NULL) {
+        return FALSE;
+    }
+
+    if (pOpen->clientType != NVKMS_CLIENT_KERNEL_SPACE) {
+        return FALSE;
+    }
+
+    if (apiHead >= NVKMS_MAX_HEADS_PER_DISP) {
+        return FALSE;
+    }
+
+    pDevEvo = pDispEvo->pDevEvo;
+    pDevEvo->nearestScaling.requested[apiHead] = nearest;
+
+    /* Otherwise the next modeset takes it into the head's viewport. */
+    if (!nvApiHeadIsActive(pDispEvo, apiHead) ||
+        pDevEvo->coreInitMethodsPending) {
+        return TRUE;
+    }
+
+    FOR_EACH_EVO_HW_HEAD_IN_MASK(pDispEvo->apiHeadState[apiHead].hwHeadsMask,
+                                 head) {
+        pDispEvo->headState[head].timings.viewPort.nearestScaling = nearest;
+
+        if (pDevEvo->nearestScaling.head[head] != nearest) {
+            pDevEvo->hal->SetOutputScaler(pDispEvo, head, &updateState);
+            changed = TRUE;
+        }
+    }
+
+    if (changed) {
+        nvEvoUpdateAndKickOff(pDispEvo, FALSE /* sync */, &updateState,
+                              TRUE /* releaseElv */);
+    }
+
+    return TRUE;
+}
+
 static NvBool HeadCRC32Capture(struct NvKmsPerOpen *pOpen,
                                void *pParamsVoid)
 {
@@ -5212,6 +5263,7 @@ NvBool nvKmsIoctl(
         ENTRY(NVKMS_IOCTL_MST_I2C_TRANSFER, MstI2cTransfer),
         ENTRY(NVKMS_IOCTL_QUERY_HEAD_RASTER, QueryHeadRaster),
         ENTRY(NVKMS_IOCTL_HEAD_CRC32_CAPTURE, HeadCRC32Capture),
+        ENTRY(NVKMS_IOCTL_SET_SCALING_FILTER, SetScalingFilter),
     };
 
     struct NvKmsPerOpen *pOpen = pOpenVoid;

@@ -1456,6 +1456,9 @@ AssignProposedModeSetHwState(NVDevEvoRec *pDevEvo,
                     status = NVKMS_SET_MODE_ONE_HEAD_STATUS_INVALID_FLIP;
                     break;
                 }
+
+                pProposedHead->timings.viewPort.nearestScaling =
+                    pDevEvo->nearestScaling.requested[apiHead];
             }
 
             if (status != NVKMS_SET_MODE_ONE_HEAD_STATUS_SUCCESS) {

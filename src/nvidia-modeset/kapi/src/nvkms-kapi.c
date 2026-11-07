@@ -3695,6 +3695,46 @@ static void SetRequestedColorRange(
  * is done for flips too. A limit can't make a mode fail that passes without
  * it, so a TEST_ONLY check skips it.
  */
+/*
+ * Store the viewport scaling filters before the flip or modeset that applies
+ * them; NVKMS applies a change right away on an active head. A modeset sends
+ * them all, in case NVKMS still has an older client's.
+ */
+static void SetScalingFilters(
+    struct NvKmsKapiDevice *device,
+    const struct NvKmsKapiRequestedModeSetConfig *requestedConfig)
+{
+    NvU32 head;
+
+    for (head = 0;
+         head < ARRAY_LEN(requestedConfig->headRequestedConfig); head++) {
+
+        const struct NvKmsKapiHeadRequestedConfig *headRequestedConfig =
+            &requestedConfig->headRequestedConfig[head];
+        struct NvKmsSetScalingFilterParams params = { };
+
+        if (((requestedConfig->headsMask & (1 << head)) == 0x0) ||
+            !(headRequestedConfig->flags.scalingFilterChanged ||
+              headRequestedConfig->flags.activeChanged ||
+              headRequestedConfig->flags.modeChanged)) {
+            continue;
+        }
+
+        params.request.deviceHandle = device->hKmsDevice;
+        params.request.dispHandle = device->hKmsDisp;
+        params.request.head = head;
+        params.request.nearest =
+            headRequestedConfig->modeSetConfig.nearestScaling;
+
+        if (!nvkms_ioctl_from_kapi_try_pmlock(device->pKmsOpen,
+                                              NVKMS_IOCTL_SET_SCALING_FILTER,
+                                              &params, sizeof(params))) {
+            nvKmsKapiLogDeviceDebug(device,
+                "Failed to set the scaling filter of head %u", head);
+        }
+    }
+}
+
 static void SetRequestedColorBpcMax(
     struct NvKmsKapiDevice *device,
     const struct NvKmsKapiRequestedModeSetConfig *requestedConfig)
@@ -4355,6 +4395,7 @@ static NvBool ApplyModeSetConfig(
     if (commit) {
         SetContentType(device, requestedConfig);
         SetRequestedColorBpcMax(device, requestedConfig);
+        SetScalingFilters(device, requestedConfig);
     }
 
     if (modesetHeadsMask == 0x0) {

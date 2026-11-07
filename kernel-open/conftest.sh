@@ -1749,6 +1749,23 @@ compile_test() {
             compile_check_conftest "$CODE" "NV_DRM_PLANE_CREATE_COLOR_PROPERTIES_PRESENT" "" "functions"
         ;;
 
+        drm_crtc_create_scaling_filter_property)
+            #
+            # Determine if the function
+            # drm_crtc_create_scaling_filter_property() is present.
+            #
+            # Added by commit 5c759eda9b04 ("drm: Introduce plane and CRTC
+            # scaling filter properties").
+            #
+            CODE="
+            #include <drm/drm_crtc.h>
+            void conftest_drm_crtc_create_scaling_filter_property(void) {
+                drm_crtc_create_scaling_filter_property();
+            }"
+
+            compile_check_conftest "$CODE" "NV_DRM_CRTC_CREATE_SCALING_FILTER_PROPERTY_PRESENT" "" "functions"
+        ;;
+
         drm_plane_create_zpos_immutable_property)
             #
             # Determine if the function drm_plane_create_zpos_immutable_property()
