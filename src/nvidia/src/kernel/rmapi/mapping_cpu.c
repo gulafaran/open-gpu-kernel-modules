@@ -448,13 +448,16 @@ memMap_IMPL
                 //
                 // A discontiguous BAR1 mapping is only usable through the
                 // mmap path, which gets every range from the TLS mapping
-                // context. Kernel clients asking for a user-space mapping
-                // (nvidia-drm GEM mmap/vmap) get only the first range back
-                // and use it as one contiguous block, so a split mapping
-                // makes them access other BAR1 mappings or run past BAR1.
+                // context, or by kernel clients asking for a user-space
+                // mapping with NV_KERNEL_RMAPI_MAP_MEMORY_RANGES, which gets
+                // every range through TLS_ENTRY_ID_MAP_RANGES. Other kernel
+                // clients get only the first range back and use it as one
+                // contiguous block, so a split mapping would make them
+                // access other BAR1 mappings or run past BAR1.
                 //
                 if (!pMapParams->bKernel &&
-                    (rmclientGetCachedPrivilege(pClient) < RS_PRIV_LEVEL_KERNEL))
+                    ((rmclientGetCachedPrivilege(pClient) < RS_PRIV_LEVEL_KERNEL) ||
+                     (tlsEntryGet(TLS_ENTRY_ID_MAP_RANGES) != NvP64_NULL)))
                 {
                     busMapFbFlags |= BUS_MAP_FB_FLAGS_ALLOW_DISCONTIG;
                 }

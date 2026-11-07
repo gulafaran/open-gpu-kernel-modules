@@ -87,6 +87,22 @@ NvU32 nvRmApiMapMemory(
     void **ppLinearAddress,
     NvU32 flags);
 
+/*
+ * nvRmApiMapMemory() that also returns the bus address ranges of the
+ * mapping as { start, size } pairs, see NV_KERNEL_RMAPI_MAP_MEMORY_RANGES.
+ */
+NvU32 nvRmApiMapMemoryRanges(
+    NvU32 hClient,
+    NvU32 hDevice,
+    NvU32 hMemory,
+    NvU64 offset,
+    NvU64 length,
+    void **ppLinearAddress,
+    NvU32 flags,
+    NvU64 (*pRanges)[2],
+    NvU32 maxRanges,
+    NvU32 *pNumRanges);
+
 NvU32 nvRmApiUnmapMemory(
     NvU32 hClient,
     NvU32 hDevice,

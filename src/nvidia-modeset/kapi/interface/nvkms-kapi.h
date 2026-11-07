@@ -204,6 +204,12 @@ typedef enum NvKmsKapiMappingTypeRec {
     NVKMS_KAPI_MAPPING_TYPE_KERNEL = 2,
 } NvKmsKapiMappingType;
 
+/* A bus address range of a mapping, see mapMemoryRanges(). */
+struct NvKmsKapiMemoryRange {
+    NvU64 start;
+    NvU64 size;
+};
+
 struct NvKmsKapiConnectorInfo {
 
     NvKmsKapiConnector handle;
@@ -1142,6 +1148,42 @@ struct NvKmsKapiFunctionsTable {
         const struct NvKmsKapiMemory *memory, NvKmsKapiMappingType type,
         const void *pLinearAddress
     );
+
+    /*!
+     * mapMemory() with NVKMS_KAPI_MAPPING_TYPE_USER that also returns the
+     * bus address ranges the memory is mapped at, in order.
+     *
+     * A mapping of video memory is several ranges when the memory isn't
+     * physically contiguous and BAR1 maps video memory 1:1 (static BAR1,
+     * e.g. with resizable BAR), or when BAR1 is too fragmented for one
+     * range. mapMemory() fails then.
+     *
+     * \param [out] ppLinearAddress  The address to pass to unmapMemory();
+     *                               the start of the first range.
+     *
+     * \param [out] ppRanges         The ranges, to be freed with
+     *                               freeMemoryRanges(); NULL if
+     *                               *pNumRanges is 0.
+     *
+     * \param [out] pNumRanges       The number of ranges; 0 if the mapping
+     *                               isn't made of bus address ranges (system
+     *                               memory).
+     *
+     * eturn NV_TRUE on success, NV_FALSE on failure.
+     */
+    NvBool (*mapMemoryRanges)
+    (
+        const struct NvKmsKapiDevice *device,
+        const struct NvKmsKapiMemory *memory,
+        void **ppLinearAddress,
+        struct NvKmsKapiMemoryRange **ppRanges,
+        NvU32 *pNumRanges
+    );
+
+    /*!
+     * Free the ranges returned by mapMemoryRanges().
+     */
+    void (*freeMemoryRanges)(struct NvKmsKapiMemoryRange *pRanges);
 
     /*!
      * Check if memory object allocated is video memory.

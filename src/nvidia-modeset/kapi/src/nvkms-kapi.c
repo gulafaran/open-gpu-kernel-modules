@@ -2333,6 +2333,93 @@ static NvBool MapMemory
     return NV_TRUE;
 }
 
+static void FreeMemoryRanges(struct NvKmsKapiMemoryRange *pRanges)
+{
+    nvKmsKapiFree(pRanges);
+}
+
+static NvBool MapMemoryRanges
+(
+    const struct NvKmsKapiDevice *device,
+    const struct NvKmsKapiMemory *memory,
+    void **ppLinearAddress,
+    struct NvKmsKapiMemoryRange **ppRanges,
+    NvU32 *pNumRanges
+)
+{
+    /* Enough for most allocations; otherwise retry with the size RM asks for. */
+    NvU32 maxRanges = 16;
+    NvU32 attempt;
+
+    ct_assert(sizeof(struct NvKmsKapiMemoryRange) == 2 * sizeof(NvU64));
+
+    *ppRanges = NULL;
+    *pNumRanges = 0;
+
+    if (device == NULL || memory == NULL) {
+        return NV_FALSE;
+    }
+
+    for (attempt = 0; attempt < 2; attempt++) {
+        struct NvKmsKapiMemoryRange *pRanges =
+            nvKmsKapiCalloc(maxRanges, sizeof(*pRanges));
+        NvU32 numRanges = 0;
+        NvU32 status;
+
+        if (pRanges == NULL) {
+            return NV_FALSE;
+        }
+
+        /*
+         * Usermode clients can't be trusted not to access mappings while the
+         * GPU is in GC6; the caller increments the GC6 refcount, as for
+         * mapMemory().
+         */
+        status = nvRmApiMapMemoryRanges(device->hRmClient,
+                                        device->hRmSubDevice,
+                                        memory->hRmHandle,
+                                        0,
+                                        memory->size,
+                                        ppLinearAddress,
+                                        DRF_DEF(OS33, _FLAGS, _MEM_SPACE, _USER),
+                                        (NvU64 (*)[2])pRanges,
+                                        maxRanges,
+                                        &numRanges);
+
+        if (status == NV_ERR_BUFFER_TOO_SMALL && numRanges > maxRanges) {
+            nvKmsKapiFree(pRanges);
+            maxRanges = numRanges;
+            continue;
+        }
+
+        if (status != NV_OK) {
+            nvKmsKapiFree(pRanges);
+            nvKmsKapiLogDeviceDebug(
+                device,
+                "Failed to map RM memory object 0x%x allocated for "
+                "NvKmsKapiMemory 0x%p (0x%x)",
+                memory->hRmHandle, memory, status);
+            return NV_FALSE;
+        }
+
+        if (numRanges == 0) {
+            nvKmsKapiFree(pRanges);
+            pRanges = NULL;
+        }
+
+        *ppRanges = pRanges;
+        *pNumRanges = numRanges;
+        return NV_TRUE;
+    }
+
+    nvKmsKapiLogDeviceDebug(
+        device,
+        "RM memory object 0x%x allocated for NvKmsKapiMemory 0x%p kept "
+        "changing its number of mapping ranges",
+        memory->hRmHandle, memory);
+    return NV_FALSE;
+}
+
 static void UnmapMemory
 (
     const struct NvKmsKapiDevice *device,
@@ -4883,6 +4970,8 @@ NvBool nvKmsKapiGetFunctionsTableInternal
 
     funcsTable->mapMemory   = MapMemory;
     funcsTable->unmapMemory = UnmapMemory;
+    funcsTable->mapMemoryRanges = MapMemoryRanges;
+    funcsTable->freeMemoryRanges = FreeMemoryRanges;
     funcsTable->isVidmem    = IsVidmem;
     funcsTable->isContiguous = IsContiguous;
     funcsTable->gc6BlockerRefCntInc = RmGc6BlockerRefCntInc;

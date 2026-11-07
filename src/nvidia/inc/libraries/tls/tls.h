@@ -128,6 +128,7 @@ enum {
     TLS_ENTRY_ID_CURRENT_GPU_INSTANCE,
     TLS_ENTRY_ID_PRIORITY,
     TLS_ENTRY_ID_GPUMGR_EXPANDED_GPU_VISIBILITY,
+    TLS_ENTRY_ID_MAP_RANGES,    // NV_KERNEL_RMAPI_RANGE_SINK, see nv-kernel-rmapi-ops.h
     TLS_ENTRY_ID_DYNAMIC, // dynamic allocations start here
     TLS_ENTRY_ID_TAG_START = 0x100000 // Custom tags start here
 };

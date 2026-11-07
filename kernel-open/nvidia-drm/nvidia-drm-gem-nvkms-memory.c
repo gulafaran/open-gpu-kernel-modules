@@ -58,6 +58,11 @@ static void __nv_drm_gem_nvkms_memory_free(struct nv_drm_gem_object *nv_gem)
                            nv_nvkms_memory->base.pMemory,
                            NVKMS_KAPI_MAPPING_TYPE_USER,
                            nv_nvkms_memory->pPhysicalAddress);
+
+        if (nv_nvkms_memory->ranges != NULL) {
+            nvKms->freeMemoryRanges(nv_nvkms_memory->ranges);
+            nv_drm_free(nv_nvkms_memory->range_ends);
+        }
     }
 
     if (nv_nvkms_memory->pages_count != 0) {
@@ -125,7 +130,27 @@ static vm_fault_t __nv_drm_gem_nvkms_handle_vma_fault(
 
     page_offset = nv_drm_vma_fault_get_page_offset(vmf, gem);
 
-    if (nv_nvkms_memory->pages_count == 0) {
+    if (nv_nvkms_memory->ranges_count > 1) {
+        const NvU64 offset = (NvU64)page_offset << PAGE_SHIFT;
+        NvU32 lo = 0, hi = nv_nvkms_memory->ranges_count;
+
+        /* The first range ending after offset. */
+        while (lo < hi) {
+            NvU32 mid = lo + (hi - lo) / 2;
+
+            if (nv_nvkms_memory->range_ends[mid] > offset) {
+                hi = mid;
+            } else {
+                lo = mid + 1;
+            }
+        }
+        if (lo == nv_nvkms_memory->ranges_count) {
+            return VM_FAULT_SIGBUS;
+        }
+
+        pfn = (nv_nvkms_memory->ranges[lo].start + offset -
+               (lo == 0 ? 0 : nv_nvkms_memory->range_ends[lo - 1])) >> PAGE_SHIFT;
+    } else if (nv_nvkms_memory->pages_count == 0) {
         pfn = (unsigned long)(uintptr_t)nv_nvkms_memory->pPhysicalAddress;
         pfn >>= PAGE_SHIFT;
         pfn += page_offset;
@@ -163,12 +188,52 @@ static struct drm_gem_object *__nv_drm_gem_nvkms_prime_dup(
     struct drm_device *dev,
     const struct nv_drm_gem_object *nv_gem_src);
 
+/*
+ * Takes over the ranges of a video memory mapping made of several bus address
+ * ranges. They must be page aligned and cover the object, in order.
+ */
+static int __nv_drm_gem_nvkms_set_ranges(
+    struct nv_drm_gem_nvkms_memory *nv_nvkms_memory,
+    struct NvKmsKapiMemoryRange *ranges,
+    NvU32 count)
+{
+    NvU64 *ends = nv_drm_calloc(count, sizeof(*ends));
+    NvU64 end = 0;
+    NvU32 i;
+
+    if (ends == NULL) {
+        return -ENOMEM;
+    }
+
+    for (i = 0; i < count; i++) {
+        if (!PAGE_ALIGNED(ranges[i].start) || !PAGE_ALIGNED(ranges[i].size) ||
+            ranges[i].size == 0) {
+            nv_drm_free(ends);
+            return -EINVAL;
+        }
+        end += ranges[i].size;
+        ends[i] = end;
+    }
+
+    if (end < nv_nvkms_memory->base.base.size) {
+        nv_drm_free(ends);
+        return -EINVAL;
+    }
+
+    nv_nvkms_memory->ranges = ranges;
+    nv_nvkms_memory->range_ends = ends;
+    nv_nvkms_memory->ranges_count = count;
+    return 0;
+}
+
 static int __nv_drm_gem_nvkms_map(
     struct nv_drm_gem_nvkms_memory *nv_nvkms_memory)
 {
     int ret = 0;
     struct nv_drm_device *nv_dev = nv_nvkms_memory->base.nv_dev;
     struct NvKmsKapiMemory *pMemory = nv_nvkms_memory->base.pMemory;
+    struct NvKmsKapiMemoryRange *ranges = NULL;
+    NvU32 ranges_count = 0;
 
     mutex_lock(&nv_nvkms_memory->map_lock);
 
@@ -198,16 +263,51 @@ static int __nv_drm_gem_nvkms_map(
         goto done;
     }
 
-    if (!nvKms->mapMemory(nv_dev->pDevice,
-                          pMemory,
-                          NVKMS_KAPI_MAPPING_TYPE_USER,
-                          &nv_nvkms_memory->pPhysicalAddress)) {
+    /*
+     * With static BAR1 (resizable BAR) video memory is mapped 1:1, so memory
+     * that isn't physically contiguous is several BAR1 ranges; mmap maps
+     * each page from its range.
+     */
+    if (!nvKms->mapMemoryRanges(nv_dev->pDevice,
+                                pMemory,
+                                &nv_nvkms_memory->pPhysicalAddress,
+                                &ranges,
+                                &ranges_count)) {
         NV_DRM_DEV_LOG_ERR(
             nv_dev,
             "Failed to map NvKmsKapiMemory 0x%p",
             pMemory);
         ret = -ENOMEM;
         goto done;
+    }
+
+    if (ranges_count > 1) {
+        ret = __nv_drm_gem_nvkms_set_ranges(nv_nvkms_memory, ranges,
+                                            ranges_count);
+        if (ret != 0) {
+            NV_DRM_DEV_LOG_ERR(
+                nv_dev,
+                "Unusable mapping ranges for NvKmsKapiMemory 0x%p",
+                pMemory);
+            nvKms->unmapMemory(nv_dev->pDevice,
+                               pMemory,
+                               NVKMS_KAPI_MAPPING_TYPE_USER,
+                               nv_nvkms_memory->pPhysicalAddress);
+            nvKms->freeMemoryRanges(ranges);
+            nv_nvkms_memory->pPhysicalAddress = NULL;
+            goto done;
+        }
+
+        /*
+         * There is no one block to ioremap_wc() for the kernel; prime vmap
+         * fails as it does when ioremap_wc() fails.
+         */
+        nv_nvkms_memory->physically_mapped = true;
+        goto done;
+    }
+
+    if (ranges != NULL) {
+        nvKms->freeMemoryRanges(ranges);
     }
 
 #if defined(NVCPU_AARCH64)
@@ -426,6 +526,9 @@ static int __nv_drm_nvkms_gem_obj_init(
     mutex_init(&nv_nvkms_memory->map_lock);
     nv_nvkms_memory->pPhysicalAddress = NULL;
     nv_nvkms_memory->pWriteCombinedIORemapAddress = NULL;
+    nv_nvkms_memory->ranges = NULL;
+    nv_nvkms_memory->range_ends = NULL;
+    nv_nvkms_memory->ranges_count = 0;
     nv_nvkms_memory->physically_mapped = false;
     nv_nvkms_memory->was_mmapped = false;
 
