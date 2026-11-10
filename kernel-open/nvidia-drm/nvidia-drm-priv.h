@@ -193,6 +193,23 @@ struct nv_drm_deadline_slot {
 };
 #endif
 
+/*
+ * What changed for a display, recorded by the event thread.  The event
+ * thread only fills this in; the connector fields themselves are written by
+ * the work, under the modeset locks whose readers document that contract.
+ */
+struct nv_drm_display_event {
+    NvKmsKapiDisplay display;
+    enum NvKmsContentProtection cp;
+    NvBool cp_changed;
+    NvBool topology_changed;
+    NvBool connection_changed;
+};
+
+#define NV_DRM_EVENT_CP_STATE      (1u << 0)
+#define NV_DRM_EVENT_TOPOLOGY      (1u << 1)
+#define NV_DRM_EVENT_CONNECTION    (1u << 2)
+
 struct nv_drm_device {
     nv_gpu_info_t gpu_info;
     MIGDeviceId gpu_mig_device;
@@ -249,6 +266,31 @@ struct nv_drm_device {
     spinlock_t held_fbs_lock;
     struct delayed_work held_fbs_work;
     atomic_t enable_event_handling;
+
+    /*
+     * Nesting depth of nv_drm_event_callback().  The NVKMS event thread also
+     * delivers the flip completion that nv_drm_atomic_commit_internal()
+     * waits for, so this tells nv_drm_mode_config_lock() that a wait for
+     * mode_config.mutex would stall the commit holding connection_mutex.
+     */
+    atomic_t nvkms_event_depth;
+
+    /*
+     * Type of the event the NVKMS thread is dispatching right now.  Only
+     * meaningful while nvkms_event_depth is non-zero; it is what the guard
+     * in nv_drm_mode_config_lock() reports when that thread has to wait.
+     */
+    atomic_t nvkms_last_event;
+
+    /*
+     * Displays with a pending event: the event thread records them here,
+     * nv_drm_publish_display_events() drains the set.  One slot per
+     * connector is enough because a display is recorded at most once, and a
+     * later event for the same display updates its slot.
+     */
+    spinlock_t display_event_lock;
+    unsigned int num_display_events;
+    struct nv_drm_display_event display_events[NVKMS_KAPI_MAX_CONNECTORS];
 
     /**
      * @flip_event_wq:
@@ -393,6 +435,20 @@ static inline struct nv_drm_device *to_nv_device(
 {
     return dev->dev_private;
 }
+
+/*
+ * Paths that can take mode_config.mutex from a context reachable from the
+ * NVKMS event thread.  Each one has to name itself, so that a guard report
+ * says who waited instead of only that somebody did.
+ */
+enum nv_drm_lock_site {
+    NV_DRM_LOCK_SITE_CP_WORK = 0,
+    NV_DRM_LOCK_SITE_ADD_ENCODER,
+    NV_DRM_LOCK_SITE_COUNT
+};
+
+void nv_drm_mode_config_lock(struct nv_drm_device *nv_dev,
+                             enum nv_drm_lock_site site);
 
 /* Per open file data, in drm_file::driver_priv */
 struct nv_drm_file {

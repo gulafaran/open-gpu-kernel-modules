@@ -61,6 +61,16 @@ void nv_drm_handle_display_cp_change(struct nv_drm_device *nv_dev,
                                      enum NvKmsContentProtection cp);
 
 void nv_drm_handle_display_cp_topology_change(struct nv_drm_device *nv_dev,
+                                              NvKmsKapiDisplay hDisplay);
+
+void nv_drm_handle_display_connection_update(struct nv_drm_device *nv_dev,
+                                             NvKmsKapiDisplay hDisplay);
+
+void nv_drm_handle_display_cp_update(struct nv_drm_device *nv_dev,
+                                     NvKmsKapiDisplay hDisplay,
+                                     enum NvKmsContentProtection cp);
+
+void nv_drm_handle_display_cp_topology_update(struct nv_drm_device *nv_dev,
                                               NvKmsKapiDisplay hDisplay,
                                               const void *topology);
 

@@ -61,7 +61,6 @@ struct nv_drm_connector {
     struct edid *edid;
 
     enum NvKmsContentProtection cp;
-    bool cp_event_pending;
 
     atomic_t connection_status_dirty;
 
@@ -163,8 +162,8 @@ bool nv_drm_connector_revoke_permissions(struct drm_device *dev,
                                          struct nv_drm_connector *nv_connector);
 void nv_drm_connector_update_link_status(struct drm_connector *connector);
 void nv_drm_connector_update_content_protection(struct nv_drm_connector *nv_connector);
-int nv_drm_connector_update_topology_property(struct nv_drm_connector *nv_connector,
-                                              const void *topology);
+int nv_drm_connector_update_topology_property(
+    struct nv_drm_connector *nv_connector, const void *topology);
 
 bool nv_drm_connector_get_native_mode(struct nv_drm_connector *nv_connector,
                                       int vrefresh,
