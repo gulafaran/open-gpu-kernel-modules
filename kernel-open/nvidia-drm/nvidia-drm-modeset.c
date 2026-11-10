@@ -1431,6 +1431,14 @@ int nv_drm_atomic_commit(struct drm_device *dev,
                     nv_dev->flip_event_wq,
                     list_empty(&nv_crtc->flip_list),
                     3 * HZ /* 3 second */) == 0) {
+                /*
+                 * The wait window is the elapsed time by definition, so the
+                 * record carries the head and whether a flip was still
+                 * pending, not a duration.
+                 */
+                nv_drm_diag_record(nv_dev, NV_DRM_DIAG_FLIP_TIMEOUT,
+                                   (int)nv_crtc->head,
+                                   list_empty(&nv_crtc->flip_list) ? 0 : 1, 0);
                 NV_DRM_DEV_LOG_ERR(
                     nv_dev,
                     "Flip event timeout on head %u", nv_crtc->head);

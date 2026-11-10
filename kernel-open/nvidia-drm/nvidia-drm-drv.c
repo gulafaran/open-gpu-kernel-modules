@@ -23,6 +23,10 @@
 #include "nvidia-drm-conftest.h" /* NV_DRM_AVAILABLE */
 
 #include "nvidia-drm-priv.h"
+
+#include <linux/debugfs.h>
+#include <linux/ktime.h>
+#include <linux/seq_file.h>
 #include "nvidia-drm-drv.h"
 #include "nvidia-drm-fb.h"
 #include "nvidia-drm-modeset.h"
@@ -871,6 +875,140 @@ static const char *nv_drm_lock_site_names[NV_DRM_LOCK_SITE_COUNT] = {
     "cp-work",
     "add-encoder",
 };
+static const char *nv_drm_diag_kind_names[NV_DRM_DIAG_KIND_COUNT] = {
+    "flip-timeout",
+    "slow-drain",
+    "guard-fire",
+    "topology-read",
+};
+
+static const char *nv_drm_diag_kind_name(int kind)
+{
+    if (kind < 0 || kind >= NV_DRM_DIAG_KIND_COUNT) {
+        return "unknown";
+    }
+
+    return nv_drm_diag_kind_names[kind];
+}
+
+/*
+ * Count an anomaly and keep it in the ring.  Flip timeouts are not logged
+ * here: the caller already logs them with the head number.
+ */
+void nv_drm_diag_record(struct nv_drm_device *nv_dev, int kind, int id,
+                        unsigned int value, u64 elapsed_ns)
+{
+    struct nv_drm_diag_record *record;
+    struct nv_drm_diag_stats *stats;
+    u64 seq;
+
+    if (nv_dev == NULL || kind < 0 || kind >= NV_DRM_DIAG_KIND_COUNT) {
+        return;
+    }
+
+    stats = &nv_dev->diag_stats;
+
+    spin_lock(&stats->lock);
+
+    seq = ++stats->seq;
+    stats->count[kind]++;
+
+    record = &stats->ring[stats->ring_next];
+    record->seq = seq;
+    record->when_ns = ktime_get_ns();
+    record->elapsed_ns = elapsed_ns;
+    record->kind = kind;
+    record->id = id;
+    record->value = value;
+
+    stats->ring_next = (stats->ring_next + 1) % NV_DRM_DIAG_RING;
+    if (stats->ring_used < NV_DRM_DIAG_RING) {
+        stats->ring_used++;
+    }
+
+    spin_unlock(&stats->lock);
+
+    if (kind == NV_DRM_DIAG_FLIP_TIMEOUT) {
+        return;
+    }
+
+    if (kind == NV_DRM_DIAG_GUARD_FIRE) {
+        pr_err("nvidia-drm: anomaly=%s seq=%llu id=%d value=%u "
+               "elapsed_ns=%llu\n", nv_drm_diag_kind_name(kind),
+               (unsigned long long)seq, id, value,
+               (unsigned long long)elapsed_ns);
+        return;
+    }
+
+    pr_warn_ratelimited("nvidia-drm: anomaly=%s seq=%llu id=%d value=%u"
+                        " elapsed_ns=%llu\n",
+                        nv_drm_diag_kind_name(kind),
+                        (unsigned long long)seq, id, value,
+                        (unsigned long long)elapsed_ns);
+}
+
+static int nv_drm_diag_stats_show(struct seq_file *m, void *data)
+{
+    struct nv_drm_diag_record ring[NV_DRM_DIAG_RING];
+    struct nv_drm_device *nv_dev = m->private;
+    struct nv_drm_diag_stats *stats = &nv_dev->diag_stats;
+    u64 count[NV_DRM_DIAG_KIND_COUNT];
+    unsigned int ring_next;
+    unsigned int ring_used;
+    unsigned int i;
+    unsigned int idx;
+    u64 seq;
+    int kind;
+
+    spin_lock(&stats->lock);
+
+    seq = stats->seq;
+    memcpy(count, stats->count, sizeof(count));
+    memcpy(ring, stats->ring, sizeof(ring));
+    ring_next = stats->ring_next;
+    ring_used = stats->ring_used;
+
+    spin_unlock(&stats->lock);
+
+    seq_printf(m, "anomalies_total %llu\n", (unsigned long long)seq);
+
+    for (kind = 0; kind < NV_DRM_DIAG_KIND_COUNT; kind++) {
+        seq_printf(m, "anomaly_count %s %llu\n",
+                   nv_drm_diag_kind_name(kind),
+                   (unsigned long long)count[kind]);
+    }
+
+    seq_printf(m, "ring %u of %u, oldest first\n", ring_used,
+               (unsigned int)NV_DRM_DIAG_RING);
+
+    for (i = 0; i < ring_used; i++) {
+        idx = (ring_next + NV_DRM_DIAG_RING - ring_used + i) %
+              NV_DRM_DIAG_RING;
+
+        seq_printf(m, "record seq=%llu kind=%s id=%d value=%u elapsed_ns=%llu"
+                   " when_ns=%llu\n",
+                   (unsigned long long)ring[idx].seq,
+                   nv_drm_diag_kind_name(ring[idx].kind),
+                   ring[idx].id, ring[idx].value,
+                   (unsigned long long)ring[idx].elapsed_ns,
+                   (unsigned long long)ring[idx].when_ns);
+    }
+
+    return 0;
+}
+
+static int nv_drm_diag_stats_open(struct inode *inode, struct file *file)
+{
+    return single_open(file, nv_drm_diag_stats_show, inode->i_private);
+}
+
+static const struct file_operations nv_drm_diag_stats_fops = {
+    .owner = THIS_MODULE,
+    .open = nv_drm_diag_stats_open,
+    .read = seq_read,
+    .llseek = seq_lseek,
+    .release = single_release,
+};
 
 /*
  * Acquire mode_config.mutex, reporting the wait when it happens while the
@@ -898,6 +1036,14 @@ void nv_drm_mode_config_lock(struct nv_drm_device *nv_dev,
 
     depth = atomic_read(&nv_dev->nvkms_event_depth);
 
+    /*
+     * Record every occurrence, including the site that waited and the event
+     * the NVKMS thread was dispatching at that moment.
+     */
+    nv_drm_diag_record(nv_dev, NV_DRM_DIAG_GUARD_FIRE, (int)site,
+                       (unsigned int)atomic_read(&nv_dev->nvkms_last_event),
+                       0);
+
     WARN_ONCE(depth != 0,
               "nvidia-drm: event thread blocked on mode_config.mutex "
               "site=%s event=%d depth=%d\n",
@@ -919,8 +1065,14 @@ static void nv_drm_publish_display_events(struct nv_drm_device *nv_dev)
 {
     struct drm_device *dev = nv_dev->dev;
     struct nv_drm_display_event pending[NVKMS_KAPI_MAX_CONNECTORS];
+    unsigned int num_published = 0;
+    unsigned int num_connection = 0;
+    unsigned int num_valid = 0;
+    unsigned int num_cp = 0;
     unsigned int num_pending;
     unsigned int i;
+    u64 t_drain = ktime_get_ns();
+    u64 took_ns;
     NvBool hotplug = FALSE;
 
     /*
@@ -963,6 +1115,8 @@ static void nv_drm_publish_display_events(struct nv_drm_device *nv_dev)
                                              &valid);
 
             if (!read_ok) {
+                nv_drm_diag_record(nv_dev, NV_DRM_DIAG_TOPOLOGY_READ,
+                                   (int)pending[i].display, valid ? 1 : 0, 0);
                 NV_DRM_DEV_LOG_ERR(nv_dev,
                                    "Failed to read HDCP topology for display "
                                    "%d", pending[i].display);
@@ -976,9 +1130,14 @@ static void nv_drm_publish_display_events(struct nv_drm_device *nv_dev)
         if (pending[i].cp_changed) {
             nv_drm_handle_display_cp_update(nv_dev, pending[i].display,
                                             pending[i].cp);
+            num_cp++;
         }
 
         if (read_ok) {
+            num_published++;
+            if (valid) {
+                num_valid++;
+            }
             nv_drm_handle_display_cp_topology_update(nv_dev,
                                                      pending[i].display,
                                                      topology);
@@ -987,6 +1146,7 @@ static void nv_drm_publish_display_events(struct nv_drm_device *nv_dev)
         if (pending[i].connection_changed) {
             nv_drm_handle_display_connection_update(nv_dev,
                                                     pending[i].display);
+            num_connection++;
             hotplug = TRUE;
         }
 
@@ -996,6 +1156,23 @@ static void nv_drm_publish_display_events(struct nv_drm_device *nv_dev)
 
     if (hotplug) {
         queue_delayed_work(nv_drm_percpu_wq, &nv_dev->hotplug_event_work, 0);
+    }
+
+    took_ns = ktime_get_ns() - t_drain;
+
+    /*
+     * One line per drain: what the event thread recorded, what the work did
+     * with it, and how long it took.  Ten lines per boot in practice, so it
+     * is printed unconditionally.
+     */
+    pr_info("nvidia-drm: drain num=%u cp=%u topo=%u conn=%u valid=%u "
+            "hotplug=%d took_ns=%llu\n",
+            num_pending, num_cp, num_published, num_connection, num_valid,
+            hotplug ? 1 : 0, (unsigned long long)took_ns);
+
+    if (took_ns >= NV_DRM_DIAG_SLOW_DRAIN_NS) {
+        nv_drm_diag_record(nv_dev, NV_DRM_DIAG_SLOW_DRAIN,
+                           (int)num_pending, num_published, took_ns);
     }
 }
 
@@ -1028,6 +1205,21 @@ static int nv_drm_dev_load(struct drm_device *dev)
     if (!drm_core_check_feature(dev, DRIVER_MODESET)) {
         return 0;
     }
+
+    spin_lock_init(&nv_dev->diag_stats.lock);
+
+    nv_dev->diag_dir = debugfs_create_dir(dev_name(dev->dev), NULL);
+    if (IS_ERR_OR_NULL(nv_dev->diag_dir)) {
+        /* Normalize so that unload never sees an error pointer. */
+        nv_dev->diag_dir = NULL;
+    } else {
+        debugfs_create_file("flip_stats", 0444, nv_dev->diag_dir, nv_dev,
+                            &nv_drm_diag_stats_fops);
+    }
+
+    pr_info("nvidia-drm: diagnostics=cp-event-defer stats=%s%s\n",
+            IS_ERR_OR_NULL(nv_dev->diag_dir) ? "-" : dev_name(dev->dev),
+            IS_ERR_OR_NULL(nv_dev->diag_dir) ? "" : "/flip_stats");
 
     /* Allocate NvKmsKapiDevice from GPU ID */
 
@@ -1235,6 +1427,9 @@ static void nv_drm_dev_unload(struct drm_device *dev)
     if (!drm_core_check_feature(dev, DRIVER_MODESET)) {
         return;
     }
+
+    debugfs_remove_recursive(nv_dev->diag_dir);
+    nv_dev->diag_dir = NULL;
 
     /* Release modeset ownership if fbdev is enabled */
 

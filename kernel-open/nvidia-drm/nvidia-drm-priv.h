@@ -210,6 +210,45 @@ struct nv_drm_display_event {
 #define NV_DRM_EVENT_TOPOLOGY      (1u << 1)
 #define NV_DRM_EVENT_CONNECTION    (1u << 2)
 
+/*
+ * Always-on counters and a ring of the last few anomalies.  They do not
+ * depend on any trace level: a stall is countable and explainable after the
+ * fact without having captured a verbose log.
+ */
+#define NV_DRM_DIAG_RING 8
+#define NV_DRM_DIAG_SLOW_DRAIN_NS 1000000ULL
+
+enum nv_drm_diag_kind {
+    NV_DRM_DIAG_FLIP_TIMEOUT = 0,
+    NV_DRM_DIAG_SLOW_DRAIN,
+    NV_DRM_DIAG_GUARD_FIRE,
+    NV_DRM_DIAG_TOPOLOGY_READ,
+    NV_DRM_DIAG_KIND_COUNT
+};
+
+struct nv_drm_diag_record {
+    u64 seq;
+    u64 when_ns;
+    u64 elapsed_ns;
+    int kind;
+    int id;
+    unsigned int value;
+};
+
+struct nv_drm_diag_stats {
+    spinlock_t lock;
+    u64 seq;
+    u64 count[NV_DRM_DIAG_KIND_COUNT];
+    unsigned int ring_next;
+    unsigned int ring_used;
+    struct nv_drm_diag_record ring[NV_DRM_DIAG_RING];
+};
+
+struct nv_drm_device;
+
+void nv_drm_diag_record(struct nv_drm_device *nv_dev, int kind, int id,
+                        unsigned int value, u64 elapsed_ns);
+
 struct nv_drm_device {
     nv_gpu_info_t gpu_info;
     MIGDeviceId gpu_mig_device;
@@ -274,6 +313,10 @@ struct nv_drm_device {
      * mode_config.mutex would stall the commit holding connection_mutex.
      */
     atomic_t nvkms_event_depth;
+
+    /* Diagnostics for this class of stall; see nv_drm_diag_record(). */
+    struct nv_drm_diag_stats diag_stats;
+    struct dentry *diag_dir;
 
     /*
      * Type of the event the NVKMS thread is dispatching right now.  Only
