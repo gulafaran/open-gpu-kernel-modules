@@ -1075,7 +1075,7 @@ void   NV_API_CALL  nv_acpi_methods_uninit       (void);
 NV_STATUS  NV_API_CALL  nv_acpi_method           (NvU32, NvU32, NvU32, void *, NvU16, NvU32 *, void *, NvU16 *);
 NV_STATUS  NV_API_CALL  nv_acpi_d3cold_dsm_for_upstream_port (nv_state_t *, NvU8 *, NvU32, NvU32, NvU32 *);
 NV_STATUS  NV_API_CALL  nv_acpi_dsm_method       (nv_state_t *, NvU8 *, NvU32, NvBool, NvU32, void *, NvU16, NvU32 *, void *, NvU16 *);
-NV_STATUS  NV_API_CALL  nv_acpi_ddc_method       (nv_state_t *, void *, NvU32 *, NvBool);
+NV_STATUS  NV_API_CALL  nv_acpi_ddc_method       (nv_state_t *, NvU32, void *, NvU32 *, NvBool);
 NV_STATUS  NV_API_CALL  nv_acpi_dod_method       (nv_state_t *, NvU32 *, NvU32 *);
 NV_STATUS  NV_API_CALL  nv_acpi_rom_method       (nv_state_t *, NvU32 *, NvU32 *);
 NV_STATUS  NV_API_CALL  nv_acpi_get_powersource  (NvU32 *);
