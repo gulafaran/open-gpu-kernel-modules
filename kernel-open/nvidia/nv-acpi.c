@@ -1059,6 +1059,7 @@ NV_STATUS NV_API_CALL nv_acpi_ddc_method(
     acpi_status status;
     union acpi_object *ddc = NULL;
     NvU32 i, largestEdidSize;
+    NvBool bTooLarge = NV_FALSE;
     nv_linux_state_t *nvl  = NV_GET_NVL_FROM_NV_STATE(nv);
     acpi_handle dev_handle = ACPI_HANDLE(nvl->dev);
     acpi_handle lcd_dev_handle  = NULL;
@@ -1118,12 +1119,16 @@ NV_STATUS NV_API_CALL nv_acpi_ddc_method(
     }
 
     //
-    // As per ACPI Spec 3.0:
-    // ARG0 = 0x1 for 128 bytes edid buffer
-    // ARG0 = 0x2 for 256 bytes edid buffer
+    // ARG0 is the EDID size in 128-byte blocks, 1 to 4 (ACPI 6, _DDC). Some
+    // firmware only returns the EDID when ARG0 matches the panel's block
+    // count and returns a non-buffer object otherwise, so try every size
+    // from the largest down, like the kernel's acpi_video_get_edid(). Don't
+    // ask for more blocks than the caller's buffer holds.
     //
 
-    largestEdidSize = bReadMultiBlock ? 2 : 1;
+    largestEdidSize = bReadMultiBlock ? NV_MIN(4, *pSize / 128) : 1;
+    if (largestEdidSize == 0)
+        largestEdidSize = 1;
 
     for (i = largestEdidSize; i >= 1; i--)
     {
@@ -1138,7 +1143,13 @@ NV_STATUS NV_API_CALL nv_acpi_ddc_method(
 
         ddc = output.pointer;
         if (ddc && (ddc->type == ACPI_TYPE_BUFFER) && (ddc->buffer.length > 0))
-            break;
+        {
+            if (ddc->buffer.length <= *pSize)
+                break;
+
+            // Doesn't fit the caller's buffer, try a smaller size
+            bTooLarge = NV_TRUE;
+        }
 
         // The method ran but gave no EDID of this size, try the smaller one
         kfree(ddc);
@@ -1151,13 +1162,7 @@ NV_STATUS NV_API_CALL nv_acpi_ddc_method(
                   "NVRM: %s: no EDID, last status: %08x \n",
                   __FUNCTION__,
                   status);
-        return NV_ERR_GENERIC;
-    }
-
-    if (ddc->buffer.length > *pSize)
-    {
-        kfree(ddc);
-        return NV_ERR_BUFFER_TOO_SMALL;
+        return bTooLarge ? NV_ERR_BUFFER_TOO_SMALL : NV_ERR_GENERIC;
     }
 
     *pSize = ddc->buffer.length;
