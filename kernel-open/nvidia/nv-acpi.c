@@ -1020,11 +1020,37 @@ NV_STATUS NV_API_CALL nv_acpi_dsm_method(
     return rmStatus;
 }
 
+//
+// Returns NV_TRUE if an output device _ADR describes an internal flat panel.
+//
+static NvBool nv_acpi_is_internal_panel(unsigned long long device_id)
+{
+    switch (device_id & 0xffff)
+    {
+        case 0x0110:
+        case 0x0118:
+        case 0x0400:
+        case 0xA420:
+            return NV_TRUE;
+        default:
+            break;
+    }
+
+    //
+    // ACPI Video Extensions, _DOD device attributes: bit 31 set selects the
+    // ACPI device ID scheme, and display type (bits 11:8) 4 is an internal
+    // digital flat panel.
+    //
+    return ((device_id & 0x80000000) &&
+            (((device_id >> 8) & 0xf) == 0x4));
+}
+
 /*
  * This function executes a _DDC ACPI method.
  */
 NV_STATUS NV_API_CALL nv_acpi_ddc_method(
     nv_state_t *nv,
+    NvU32 acpiId,
     void *pEdidBuffer,
     NvU32 *pSize,
     NvBool bReadMultiBlock
@@ -1065,18 +1091,24 @@ NV_STATUS NV_API_CALL nv_acpi_ddc_method(
             /* Couldnt query device_id for this device */
             continue;
 
-        switch (device_id & 0xffff) {
-            case 0x0110:
-            case 0x0118:
-            case 0x0400:
-            case 0xA420:
-                lcd_dev_handle = handle;
-                nv_printf(NV_DBG_INFO, "NVRM: %s Found LCD: %llx\n",
-                          __FUNCTION__, device_id);
-                break;
-            default:
-                break;
-        }
+        if (!nv_acpi_is_internal_panel(device_id))
+            continue;
+
+        //
+        // RM asks for the EDID of one display, named by its _DOD ID. Only
+        // answer for the output device with that ID, so the panel's EDID
+        // isn't handed out for other outputs. Compare display type, port and
+        // index (bits 11:0) only, like the kernel's ACPI video driver, since
+        // firmware isn't consistent about the vendor bits 15:12. A zero ID
+        // means the caller couldn't map the display; keep using the first
+        // panel then.
+        //
+        if ((acpiId != 0) && ((device_id & 0xfff) != (acpiId & 0xfff)))
+            continue;
+
+        lcd_dev_handle = handle;
+        nv_printf(NV_DBG_INFO, "NVRM: %s Found LCD: %llx (ACPI ID %x)\n",
+                  __FUNCTION__, device_id, acpiId);
     }
 
     if (lcd_dev_handle == NULL)
@@ -1722,6 +1754,7 @@ NV_STATUS NV_API_CALL nv_acpi_d3cold_dsm_for_upstream_port(
 
 NV_STATUS NV_API_CALL nv_acpi_ddc_method(
     nv_state_t *nv,
+    NvU32 acpiId,
     void *pEdidBuffer,
     NvU32 *pSize,
     NvBool bReadMultiBlock

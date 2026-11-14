@@ -3384,7 +3384,7 @@ NV_STATUS osCallACPI_DDC
 
     portMemSet(pOutData, 0, *pOutSize);
 
-    rmStatus = nv_acpi_ddc_method(nv, pOutData, pOutSize, bReadMultiBlock);
+    rmStatus = nv_acpi_ddc_method(nv, ulAcpiId, pOutData, pOutSize, bReadMultiBlock);
 
     return rmStatus;
 }
