@@ -1087,7 +1087,7 @@ static NvBool GrabOwnership(struct NvKmsKapiDevice *device)
 {
     struct NvKmsGrabOwnershipParams paramsGrab = { };
 
-    if (device->hKmsDevice == 0x0) {
+    if (device == NULL || device->hKmsDevice == 0x0) {
         return NV_TRUE;
     }
 
@@ -1108,7 +1108,7 @@ static void ReleaseOwnership(struct NvKmsKapiDevice *device)
 {
     struct NvKmsReleaseOwnershipParams paramsRelease = { };
 
-    if (device->hKmsDevice == 0x0) {
+    if (device == NULL || device->hKmsDevice == 0x0) {
         return;
     }
 
