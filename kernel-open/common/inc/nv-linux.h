@@ -1487,6 +1487,9 @@ typedef struct nv_linux_state_s {
 
     /* Suppress duplicate TDISP XIDs from one PCI recovery event. */
     atomic_t tdisp_aer_reported;
+
+    /* The GPU was intact when the last non-fatal PCIe error was reported */
+    NvBool pcie_nonfatal_intact;
     nv_hwmon_t hwmon;
     nv_fdinfo_t fdinfo;
 } nv_linux_state_t;
