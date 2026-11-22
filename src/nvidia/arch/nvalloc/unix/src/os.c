@@ -29,6 +29,7 @@
 #include <nvos.h>
 #include <osapi.h>
 #include <ctrl/ctrl0000/ctrl0000gpu.h>
+#include <ctrl/ctrl0000/ctrl0000system.h>
 #include <ctrl/ctrl0000/ctrl0000unix.h>
 #include <class/cl90cd.h> // NV_EVENT_BUFFER_BIND
 #include <nvdevid.h>
@@ -3302,6 +3303,16 @@ NV_STATUS osCallACPI_DSM
             pAcpiDsmGuid = (NvU8 *)&NVPCF_ACPI_DSM_GUID;
             acpiDsmRev = NVPCF_3X_ACPI_DSM_REVISION_ID;
             acpiDsmInArgSize = (*pSize);
+            //
+            // For reads *pSize is the size of the output buffer, up to 4 KiB,
+            // but Arg3 can't exceed NV_MAX_ACPI_DSM_PARAM_SIZE (1 KiB, see
+            // nv-acpi.c). Writes pass their data in Arg3, don't truncate those.
+            //
+            if ((acpiDsmSubFunction != NVPCF0100_CTRL_CONFIG_DSM_3X_FUNC_NVPCF_WRITE_PLATFORM_READ_DYNAMIC_PRIMITIVES_DATA) &&
+                (acpiDsmSubFunction != NVPCF0100_CTRL_CONFIG_DSM_3X_FUNC_NVPCF_WRITE_PLATFORM_READ_CRITICAL_STATUS))
+            {
+                acpiDsmInArgSize = NV_MIN(acpiDsmInArgSize, 1024);
+            }
             acpiNvpcfDsmFunction = NV_TRUE;
             break;
 

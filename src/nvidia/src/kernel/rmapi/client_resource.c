@@ -3331,13 +3331,6 @@ cliresCtrlCmdSystemNVPCFGetPowerModeInfo_IMPL
                         goto nvpcf3xGetParams_exit;
                     }
                 }
-                else
-                {
-                    // Divide by 4 for cases of sub-func 1,2,3 that are passing in
-                    // a buffer to receive data via because NvU32 pointer is passed
-                    // below in osCallACPI_DSM call.
-                    dataSize = dataSize / 4;
-                }
             }
             else
             {
