@@ -2646,6 +2646,7 @@ NV_STATUS NV_API_CALL rm_power_management(
     NV_STATUS rmStatus = NV_OK;
     void *fp;
     NvBool bTryAgain = NV_FALSE;
+    NvBool bDisableConsoleAccess;
 
     NV_ENTER_RM_RUNTIME(sp,fp);
     threadStateInit(&threadState, THREAD_STATE_FLAGS_DEVICE_INIT);
@@ -2655,7 +2656,14 @@ NV_STATUS NV_API_CALL rm_power_management(
     // For GPU driving console, disable console access here, to ensure no console
     // writes through BAR1 can interfere with physical RM's setup of BAR1
     //
-    if (pNv->client_managed_console && !pNv->sysmem_mapped_console)
+    // Not once the firmware console is gone: the console lock would invert
+    // against the NVKMS PM lock, which is held across a system suspend and
+    // resume. Sampled once, so that the unlock below matches.
+    //
+    bDisableConsoleAccess = pNv->client_managed_console &&
+                            !pNv->sysmem_mapped_console &&
+                            !pNv->fw_console_disabled;
+    if (bDisableConsoleAccess)
     {
         os_disable_console_access();
     }
@@ -2741,7 +2749,7 @@ NV_STATUS NV_API_CALL rm_power_management(
         rmapiLockRelease();
     }
 
-    if (pNv->client_managed_console && !pNv->sysmem_mapped_console)
+    if (bDisableConsoleAccess)
     {
         os_enable_console_access();
     }
@@ -2809,6 +2817,7 @@ NV_STATUS NV_API_CALL rm_transition_dynamic_power(
     NV_STATUS           status = NV_OK;
     THREAD_STATE_NODE   threadState;
     void               *fp;
+    NvBool              bDisableConsoleAccess;
 
     if (NV_IS_SOC_DISPLAY_DEVICE(nv))
     {
@@ -2832,7 +2841,10 @@ NV_STATUS NV_API_CALL rm_transition_dynamic_power(
         threadStateResetTimeout(pGpu);
     }
 
-    if (nv->client_managed_console && !nv->sysmem_mapped_console)
+    // Sampled once, so that the unlock below matches.
+    bDisableConsoleAccess = nv->client_managed_console &&
+                            !nv->sysmem_mapped_console;
+    if (bDisableConsoleAccess)
     {
         os_disable_console_access();
     }
@@ -2851,7 +2863,7 @@ NV_STATUS NV_API_CALL rm_transition_dynamic_power(
         rmGpuLocksRelease(GPUS_LOCK_FLAGS_NONE, NULL);
     }
 
-    if (nv->client_managed_console && !nv->sysmem_mapped_console)
+    if (bDisableConsoleAccess)
     {
         os_enable_console_access();
     }
