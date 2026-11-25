@@ -704,19 +704,55 @@ static void SetVrrHwStateOneDisp(NVDispEvoPtr pDispEvo,
             if (pHeadState->timings.vrr.type == NVKMS_VRR_TYPE_GAMING) {
                 const NvU32 timeout = (pHeadState->timings.vrr.minRefreshRate) ?
                                           (1000000ULL / pHeadState->timings.vrr.minRefreshRate) : 0;
-                // ignores inactive heads
-                nvEvoArmLightweightSupervisor(pDispEvo, head,
-                                            enableVrrOnHead[head], TRUE);
-                if (!enableVrrOnHead[head]) {
+                /*
+                 * Merge mode (2Heads1OR): switching both heads from stall
+                 * lock back to continuous mode can break the raster lock
+                 * between them, and some sinks then blank for seconds.
+                 * Instead keep the heads in stall lock and let the min
+                 * refresh timeout release every frame at the native frame
+                 * period, which gives a fixed refresh rate.
+                 *
+                 * Only do this for a VRR toggle at flip time (pWorkArea !=
+                 * NULL). nvDisableVrr() passes NULL before every modeset;
+                 * nothing outside this file reprograms stall lock or the
+                 * display rate, so it must really disable them.
+                 *
+                 * Round the period down: a timeout longer than the raster
+                 * would stretch every frame past the native refresh rate.
+                 */
+                const NvU64 rasterPeriodUs =
+                    (pHeadState->timings.pixelClockHz != 0) ?
+                        (((NvU64)pHeadState->timings.rasterSize.y *
+                          pHeadState->timings.rasterSize.x * 1000000ULL) /
+                         pHeadState->timings.pixelClockHz) : 0;
+
+                if (!enableVrrOnHead[head] &&
+                    (pWorkArea != NULL) &&
+                    (pHeadState->mergeMode != NV_EVO_MERGE_MODE_DISABLED) &&
+                    (rasterPeriodUs != 0)) {
+                    nvEvoArmLightweightSupervisor(pDispEvo, head,
+                                                  NV_FALSE, TRUE);
                     ClearElvBlock(pDispEvo, head);
+                    pDevEvo->hal->SetStallLock(pDispEvo, head, NV_TRUE,
+                                               &updateState);
+                    pDevEvo->hal->SetDisplayRate(pDispEvo, head, NV_TRUE,
+                                                 &updateState,
+                                                 (NvU32)rasterPeriodUs);
+                } else {
+                    // ignores inactive heads
+                    nvEvoArmLightweightSupervisor(pDispEvo, head,
+                                                enableVrrOnHead[head], TRUE);
+                    if (!enableVrrOnHead[head]) {
+                        ClearElvBlock(pDispEvo, head);
+                    }
+                    pDevEvo->hal->SetStallLock(pDispEvo, head,
+                                            enableVrrOnHead[head],
+                                            &updateState);
+                    pDevEvo->hal->SetDisplayRate(pDispEvo, head,
+                                            enableVrrOnHead[head],
+                                            &updateState,
+                                            timeout);
                 }
-                pDevEvo->hal->SetStallLock(pDispEvo, head,
-                                           enableVrrOnHead[head],
-                                           &updateState);
-                pDevEvo->hal->SetDisplayRate(pDispEvo, head,
-                                             enableVrrOnHead[head],
-                                             &updateState,
-                                             timeout);
             } else if (pHeadState->timings.vrr.type == NVKMS_VRR_TYPE_MEDIA) {
                 NvU64 targetVTotal = pHeadState->timings.rasterSize.y;
                 NvU16 targetFraction = 0;
