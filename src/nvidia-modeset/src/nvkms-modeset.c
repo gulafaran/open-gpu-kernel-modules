@@ -3758,6 +3758,8 @@ KickoffProposedModeSetHwState(
             pDevEvo->hal->Update(pDevEvo, &updateState,
                                  TRUE /* releaseElv */);
         }
+
+        nvEnterVrrFixedRateOneShot(pDispEvo);
     }
 }
 

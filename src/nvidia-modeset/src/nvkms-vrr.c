@@ -657,6 +657,125 @@ static void ConfigVrrPstateSwitch(NVDispEvoPtr pDispEvo, NvBool vrrEnabled,
     }
 }
 
+/*
+ * Merge mode (2Heads1OR) with Gaming VRR: the secondary head follows the
+ * primary head through the stall lock pin (see
+ * nvEvoEnableMergeModePreModeset()).  Switching both heads between
+ * continuous mode and stall lock can break the raster lock between them,
+ * in either direction, and some sinks then blank for seconds.  So such
+ * heads are kept in stall lock for as long as the mode is up: while VRR
+ * is not active, the min refresh interval is set to the raster period, so
+ * each frame is released at the native frame period, which gives a fixed
+ * refresh rate.  Toggling VRR then only changes the min refresh interval.
+ *
+ * Round the period down: a timeout longer than the raster would stretch
+ * every frame past the native refresh rate.  A period of 0 would program
+ * _MIN_REFRESH_DISABLE and leave the head stalled, so don't use the fixed
+ * rate one-shot mode then.
+ */
+static NvU32 VrrRasterPeriodUs(const NVHwModeTimingsEvo *pTimings)
+{
+    if (pTimings->pixelClockHz == 0) {
+        return 0;
+    }
+
+    return (NvU32)(((NvU64)pTimings->rasterSize.y *
+                    pTimings->rasterSize.x * 1000000ULL) /
+                   pTimings->pixelClockHz);
+}
+
+static NvBool UseVrrFixedRateOneShot(const NVDispEvoRec *pDispEvo,
+                                     NvU32 head)
+{
+    const NVDispHeadStateEvoRec *pHeadState = &pDispEvo->headState[head];
+
+    return nvHeadIsActive(pDispEvo, head) &&
+           (pHeadState->timings.vrr.type == NVKMS_VRR_TYPE_GAMING) &&
+           (pHeadState->mergeMode != NV_EVO_MERGE_MODE_DISABLED) &&
+           (VrrRasterPeriodUs(&pHeadState->timings) != 0);
+}
+
+static void SetVrrFixedRateOneShot(NVDispEvoPtr pDispEvo, NvU32 head,
+                                   NVEvoUpdateState *pUpdateState)
+{
+    NVDevEvoPtr pDevEvo = pDispEvo->pDevEvo;
+    NVDispHeadStateEvoRec *pHeadState = &pDispEvo->headState[head];
+
+    pDevEvo->hal->SetStallLock(pDispEvo, head, NV_TRUE, pUpdateState);
+    pDevEvo->hal->SetDisplayRate(pDispEvo, head, NV_TRUE, pUpdateState,
+                                 VrrRasterPeriodUs(&pHeadState->timings));
+    pHeadState->vrr.fixedRateOneShot = NV_TRUE;
+}
+
+static NvBool AnyVrrFixedRateOneShotHeads(const NVDispEvoRec *pDispEvo,
+                                          NvU32 apiHeadMask)
+{
+    NvU32 apiHead, head;
+
+    for (apiHead = 0; apiHead < NVKMS_MAX_HEADS_PER_DISP; apiHead++) {
+        if (!(apiHeadMask & (1 << apiHead))) {
+            continue;
+        }
+        FOR_EACH_EVO_HW_HEAD_IN_MASK(pDispEvo->apiHeadState[apiHead].hwHeadsMask, head) {
+            if (pDispEvo->headState[head].vrr.fixedRateOneShot) {
+                return NV_TRUE;
+            }
+        }
+    }
+
+    return NV_FALSE;
+}
+
+/*!
+ * Put merge mode heads with Gaming VRR into the fixed rate one-shot mode
+ * (see UseVrrFixedRateOneShot()).
+ *
+ * Call this after the post-modeset update that finishes the merge mode
+ * setup (nvEvoEnableMergeModePostModeset()) has been kicked off.  This is
+ * the only switch from continuous mode to stall lock for such heads while
+ * the mode is up; later VRR toggles only change the min refresh interval.
+ */
+void nvEnterVrrFixedRateOneShot(NVDispEvoRec *pDispEvo)
+{
+    NVDevEvoPtr pDevEvo = pDispEvo->pDevEvo;
+    NVEvoUpdateState updateState = { };
+    NvU32 headMask = 0;
+    NvU32 head;
+
+    if (!pDevEvo->vrr.enabled) {
+        return;
+    }
+
+    for (head = 0; head < pDevEvo->numHeads; head++) {
+        if (UseVrrFixedRateOneShot(pDispEvo, head) &&
+            !pDispEvo->headState[head].vrr.fixedRateOneShot) {
+            headMask |= NVBIT(head);
+        }
+    }
+
+    if (headMask == 0) {
+        return;
+    }
+
+    // VRR is never active right after a modeset.
+    nvAssert(!nvAnyActiveVrrHeads(pDevEvo));
+
+    // Wait for the merge mode setup update to complete.
+    nvRMSyncEvoChannel(pDevEvo, pDevEvo->core, __LINE__);
+
+    FOR_EACH_EVO_HW_HEAD_IN_MASK(headMask, head) {
+        nvEvoArmLightweightSupervisor(pDispEvo, head, NV_FALSE, TRUE);
+        SetVrrFixedRateOneShot(pDispEvo, head, &updateState);
+    }
+
+    nvEvoUpdateAndKickOff(pDispEvo, TRUE, &updateState,
+                          TRUE /* releaseElv */);
+
+    FOR_EACH_EVO_HW_HEAD_IN_MASK(headMask, head) {
+        nvEvoArmLightweightSupervisor(pDispEvo, head, NV_FALSE, FALSE);
+    }
+}
+
 static void SetVrrHwStateOneDisp(NVDispEvoPtr pDispEvo,
                                  const struct NvKmsFlipWorkArea *pWorkArea,
                                  NvU32 applyAllowVrrApiHeadMask,
@@ -705,39 +824,23 @@ static void SetVrrHwStateOneDisp(NVDispEvoPtr pDispEvo,
                 const NvU32 timeout = (pHeadState->timings.vrr.minRefreshRate) ?
                                           (1000000ULL / pHeadState->timings.vrr.minRefreshRate) : 0;
                 /*
-                 * Merge mode (2Heads1OR): switching both heads from stall
-                 * lock back to continuous mode can break the raster lock
-                 * between them, and some sinks then blank for seconds.
-                 * Instead keep the heads in stall lock and let the min
-                 * refresh timeout release every frame at the native frame
-                 * period, which gives a fixed refresh rate.
+                 * Merge mode: when VRR is toggled off at flip time, go
+                 * back to the fixed rate one-shot mode instead of
+                 * continuous mode (see UseVrrFixedRateOneShot()).
                  *
-                 * Only do this for a VRR toggle at flip time (pWorkArea !=
-                 * NULL). nvDisableVrr() passes NULL before every modeset;
-                 * nothing outside this file reprograms stall lock or the
-                 * display rate, so it must really disable them.
-                 *
-                 * Round the period down: a timeout longer than the raster
-                 * would stretch every frame past the native refresh rate.
+                 * nvDisableVrr() passes pWorkArea == NULL before every
+                 * modeset; nothing outside this file reprograms stall lock
+                 * or the display rate, so it must really disable them.
+                 * nvEnterVrrFixedRateOneShot() re-enters the fixed rate
+                 * mode after the modeset.
                  */
-                const NvU64 rasterPeriodUs =
-                    (pHeadState->timings.pixelClockHz != 0) ?
-                        (((NvU64)pHeadState->timings.rasterSize.y *
-                          pHeadState->timings.rasterSize.x * 1000000ULL) /
-                         pHeadState->timings.pixelClockHz) : 0;
-
                 if (!enableVrrOnHead[head] &&
                     (pWorkArea != NULL) &&
-                    (pHeadState->mergeMode != NV_EVO_MERGE_MODE_DISABLED) &&
-                    (rasterPeriodUs != 0)) {
+                    UseVrrFixedRateOneShot(pDispEvo, head)) {
                     nvEvoArmLightweightSupervisor(pDispEvo, head,
                                                   NV_FALSE, TRUE);
                     ClearElvBlock(pDispEvo, head);
-                    pDevEvo->hal->SetStallLock(pDispEvo, head, NV_TRUE,
-                                               &updateState);
-                    pDevEvo->hal->SetDisplayRate(pDispEvo, head, NV_TRUE,
-                                                 &updateState,
-                                                 (NvU32)rasterPeriodUs);
+                    SetVrrFixedRateOneShot(pDispEvo, head, &updateState);
                 } else {
                     // ignores inactive heads
                     nvEvoArmLightweightSupervisor(pDispEvo, head,
@@ -752,6 +855,7 @@ static void SetVrrHwStateOneDisp(NVDispEvoPtr pDispEvo,
                                             enableVrrOnHead[head],
                                             &updateState,
                                             timeout);
+                    pHeadState->vrr.fixedRateOneShot = NV_FALSE;
                 }
             } else if (pHeadState->timings.vrr.type == NVKMS_VRR_TYPE_MEDIA) {
                 NvU64 targetVTotal = pHeadState->timings.rasterSize.y;
@@ -871,6 +975,16 @@ void nvSetVrrActive(NVDispEvoRec *pDispEvo,
             isUpdate = NV_TRUE;
             break;
         }
+    }
+
+    /*
+     * Before a modeset (pWorkArea == NULL, from nvDisableVrr()), heads in
+     * the fixed rate one-shot mode must leave stall lock even though their
+     * VRR active state does not change.
+     */
+    if (!isUpdate && (pWorkArea == NULL)) {
+        isUpdate = AnyVrrFixedRateOneShotHeads(pDispEvo,
+                                               applyAllowVrrApiHeadMask);
     }
 
     if (!isUpdate) {

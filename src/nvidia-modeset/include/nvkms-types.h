@@ -2011,6 +2011,12 @@ typedef struct _NVDispHeadStateEvoRec {
     struct {
         NvU64 targetVTotal;
         NvU16 targetFraction;
+        /*
+         * Merge mode with Gaming VRR: VRR is not active, but the head is
+         * kept in stall lock with the min refresh interval set to the
+         * raster period, so it runs at a fixed refresh rate.
+         */
+        NvBool fixedRateOneShot;
     } vrr;
 
     /*

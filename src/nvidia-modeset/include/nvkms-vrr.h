@@ -46,6 +46,7 @@ void nvAdjustHwModeTimingsForVrrEvo(
 NvBool nvAnyActiveVrrHeads(const NVDevEvoRec *pDevEvo);
 void nvDisableVrr(NVDispEvoRec *pDispEvo, NVEvoUpdateState *updateState);
 void nvEnableVrr(NVDispEvoRec *pDispEvo, NVEvoUpdateState *updateState);
+void nvEnterVrrFixedRateOneShot(NVDispEvoRec *pDispEvo);
 void nvVrrLfcNotifyFlip(NVDispEvoPtr pDispEvo, const NvU32 apiHead,
                         const NvBool tearing);
 void nvVrrLfcCancel(NVDevEvoPtr pDevEvo);
