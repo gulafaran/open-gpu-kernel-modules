@@ -3104,20 +3104,31 @@ static NvU32 GetVrrOneShotHeadMaskC3(const NVDevEvoRec *pDevEvo, NvU32 sd)
 {
     NvU32 vrrOneShotHeadMask = 0;
 
-    if (pDevEvo->vrr.enabled && (pDevEvo->pDispEvo[sd] != NULL)) {
+    if (pDevEvo->pDispEvo[sd] != NULL) {
         const NVDispEvoRec *pDispEvo = pDevEvo->pDispEvo[sd];
         NvU32 apiHead;
 
         for (apiHead = 0; apiHead < NVKMS_MAX_HEADS_PER_DISP; apiHead++) {
-            if (pDispEvo->apiHeadState[apiHead].vrr.active) {
-                NvU32 head;
-                FOR_EACH_EVO_HW_HEAD_IN_MASK(
-                    pDispEvo->apiHeadState[apiHead].hwHeadsMask, head) {
-                    if ((head < pDevEvo->numHeads) &&
-                        (pDispEvo->headState[head].timings.vrr.type ==
-                         NVKMS_VRR_TYPE_GAMING)) {
-                        vrrOneShotHeadMask |= NVBIT(head);
-                    }
+            const NvBool vrrActive = pDevEvo->vrr.enabled &&
+                pDispEvo->apiHeadState[apiHead].vrr.active;
+            NvU32 head;
+
+            /*
+             * 2Heads1OR heads in the VRR fixed rate one-shot mode are stall
+             * locked although VRR is not active on them, and they stay in
+             * it across modesets that leave them unchanged, while
+             * pDevEvo->vrr.enabled is briefly FALSE.
+             */
+            FOR_EACH_EVO_HW_HEAD_IN_MASK(
+                pDispEvo->apiHeadState[apiHead].hwHeadsMask, head) {
+                if (head >= pDevEvo->numHeads) {
+                    continue;
+                }
+                if ((vrrActive &&
+                     (pDispEvo->headState[head].timings.vrr.type ==
+                      NVKMS_VRR_TYPE_GAMING)) ||
+                    pDispEvo->headState[head].vrr.fixedRateOneShot) {
+                    vrrOneShotHeadMask |= NVBIT(head);
                 }
             }
         }
