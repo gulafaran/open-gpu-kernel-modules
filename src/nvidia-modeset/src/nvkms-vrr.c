@@ -398,6 +398,12 @@ static void TellRMAboutVrrHead(NVDispEvoPtr pDispEvo,
     }
 }
 
+static void SetVrrActive(NVDispEvoRec *pDispEvo,
+                         struct NvKmsFlipWorkArea *pWorkArea,
+                         const NvU32 applyAllowVrrApiHeadMask,
+                         const NvU32 vrrActiveApiHeadMask,
+                         const NvU32 keepFixedRateApiHeadMask);
+
 static void RmDisableVrr(NVDispEvoRec *pDispEvo)
 {
     NvU32 head;
@@ -411,7 +417,18 @@ static void RmDisableVrr(NVDispEvoRec *pDispEvo)
     }
 }
 
-void nvDisableVrr(NVDispEvoRec *pDispEvo, NVEvoUpdateState *updateState)
+/*!
+ * Disable VRR on a disp before a modeset.
+ *
+ * \param[in]  keepFixedRateApiHeadMask  The api heads that the modeset
+ *            leaves unchanged.  Merge mode heads among them stay in the
+ *            fixed rate one-shot mode (see UseVrrFixedRateOneShot()) instead
+ *            of being switched to continuous mode and back for a modeset
+ *            that doesn't touch them.
+ */
+void nvDisableVrr(NVDispEvoRec *pDispEvo,
+                  NvU32 keepFixedRateApiHeadMask,
+                  NVEvoUpdateState *updateState)
 {
     NvU32 apiHead, head;
     NVDispHeadStateEvoRec *pHeadState;
@@ -434,7 +451,8 @@ void nvDisableVrr(NVDispEvoRec *pDispEvo, NVEvoUpdateState *updateState)
     const NvU32 fullApiHeadMask = ~0u;
     const NvU32 emptyApiHeadMask = 0;
 
-    nvSetVrrActive(pDispEvo, NULL, fullApiHeadMask, emptyApiHeadMask);
+    SetVrrActive(pDispEvo, NULL, fullApiHeadMask, emptyApiHeadMask,
+                 keepFixedRateApiHeadMask);
     RmDisableVrr(pDispEvo);
 
     for (apiHead = 0; apiHead < pDevEvo->numApiHeads; apiHead++) {
@@ -750,9 +768,15 @@ void nvEnterVrrFixedRateOneShot(NVDispEvoRec *pDispEvo)
     NvU32 head;
 
     if (!pDevEvo->vrr.enabled) {
+        // nvEnableVrr() enables VRR whenever a kept head has Gaming VRR.
+        nvAssert(!AnyVrrFixedRateOneShotHeads(pDispEvo, ~0u));
         return;
     }
 
+    /*
+     * Heads the modeset left unchanged are still in the fixed rate mode
+     * (see nvDisableVrr()); only enter it on the others.
+     */
     for (head = 0; head < pDevEvo->numHeads; head++) {
         if (UseVrrFixedRateOneShot(pDispEvo, head) &&
             !pDispEvo->headState[head].vrr.fixedRateOneShot) {
@@ -786,7 +810,8 @@ void nvEnterVrrFixedRateOneShot(NVDispEvoRec *pDispEvo)
 static void SetVrrHwStateOneDisp(NVDispEvoPtr pDispEvo,
                                  const struct NvKmsFlipWorkArea *pWorkArea,
                                  NvU32 applyAllowVrrApiHeadMask,
-                                 NvU32 enableApiHeadMask)
+                                 NvU32 enableApiHeadMask,
+                                 NvU32 keepFixedRateApiHeadMask)
 {
     NVDevEvoPtr pDevEvo = pDispEvo->pDevEvo;
     NvBool enableVrrOnHead[NVKMS_MAX_HEADS_PER_DISP];
@@ -837,12 +862,16 @@ static void SetVrrHwStateOneDisp(NVDispEvoPtr pDispEvo,
                  *
                  * nvDisableVrr() passes pWorkArea == NULL before every
                  * modeset; nothing outside this file reprograms stall lock
-                 * or the display rate, so it must really disable them.
-                 * nvEnterVrrFixedRateOneShot() re-enters the fixed rate
-                 * mode after the modeset.
+                 * or the display rate, so it must really disable them on
+                 * heads the modeset changes.  nvEnterVrrFixedRateOneShot()
+                 * re-enters the fixed rate mode after the modeset.  Heads
+                 * the modeset leaves unchanged (keepFixedRateApiHeadMask)
+                 * stay in the fixed rate mode, so the modeset doesn't
+                 * switch them to continuous mode and back.
                  */
                 if (!enableVrrOnHead[head] &&
-                    (pWorkArea != NULL) &&
+                    ((pWorkArea != NULL) ||
+                     (keepFixedRateApiHeadMask & (1 << apiHead))) &&
                     UseVrrFixedRateOneShot(pDispEvo, head)) {
                     nvEvoArmLightweightSupervisor(pDispEvo, head,
                                                   NV_FALSE, TRUE);
@@ -935,13 +964,11 @@ static NvBool IsMediaVrrStateChanged(
     return FALSE;
 }
 
-/*!
- * Modify the VRR state to activate or deactivate VRR on the heads of a pDevEvo.
- */
-void nvSetVrrActive(NVDispEvoRec *pDispEvo,
-                    struct NvKmsFlipWorkArea *pWorkArea,
-                    const NvU32 applyAllowVrrApiHeadMask,
-                    const NvU32 vrrActiveApiHeadMask)
+static void SetVrrActive(NVDispEvoRec *pDispEvo,
+                         struct NvKmsFlipWorkArea *pWorkArea,
+                         const NvU32 applyAllowVrrApiHeadMask,
+                         const NvU32 vrrActiveApiHeadMask,
+                         const NvU32 keepFixedRateApiHeadMask)
 {
     NvU32 apiHead;
     NvU32 currVrrActiveApiHeadMask = 0;
@@ -986,12 +1013,13 @@ void nvSetVrrActive(NVDispEvoRec *pDispEvo,
 
     /*
      * Before a modeset (pWorkArea == NULL, from nvDisableVrr()), heads in
-     * the fixed rate one-shot mode must leave stall lock even though their
-     * VRR active state does not change.
+     * the fixed rate one-shot mode that the modeset changes must leave
+     * stall lock even though their VRR active state does not change.
      */
     if (!isUpdate && (pWorkArea == NULL)) {
         isUpdate = AnyVrrFixedRateOneShotHeads(pDispEvo,
-                                               applyAllowVrrApiHeadMask);
+                                               applyAllowVrrApiHeadMask &
+                                               ~keepFixedRateApiHeadMask);
     }
 
     if (!isUpdate) {
@@ -999,7 +1027,7 @@ void nvSetVrrActive(NVDispEvoRec *pDispEvo,
     }
 
     SetVrrHwStateOneDisp(pDispEvo, pWorkArea, applyAllowVrrApiHeadMask,
-                         vrrActiveApiHeadMask);
+                         vrrActiveApiHeadMask, keepFixedRateApiHeadMask);
 
     for (apiHead = 0; apiHead < NVKMS_MAX_HEADS_PER_DISP; apiHead++) {
         if (!(applyAllowVrrApiHeadMask & (1 << apiHead))) {
@@ -1018,6 +1046,18 @@ void nvSetVrrActive(NVDispEvoRec *pDispEvo,
             pProposedApiHead->allmMode = NVKMS_ALLM_MODE_ENABLED_DYNAMIC;
         }
     }
+}
+
+/*!
+ * Modify the VRR state to activate or deactivate VRR on the heads of a pDevEvo.
+ */
+void nvSetVrrActive(NVDispEvoRec *pDispEvo,
+                    struct NvKmsFlipWorkArea *pWorkArea,
+                    const NvU32 applyAllowVrrApiHeadMask,
+                    const NvU32 vrrActiveApiHeadMask)
+{
+    SetVrrActive(pDispEvo, pWorkArea, applyAllowVrrApiHeadMask,
+                 vrrActiveApiHeadMask, 0 /* keepFixedRateApiHeadMask */);
 }
 
 /*!

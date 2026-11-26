@@ -3827,11 +3827,24 @@ ApplyProposedModeSetHwStateOneDisp(
     NVDevEvoPtr pDevEvo = pDispEvo->pDevEvo;
     NvU32 head;
     const NvU32 sd = pDispEvo->displayOwner;
+    NvU32 unchangedApiHeadMask = 0;
 
     nvkms_memset(&pWorkArea->modesetUpdateState, 0,
                  sizeof(pWorkArea->modesetUpdateState));
 
-    nvDisableVrr(pDispEvo, &pWorkArea->modesetUpdateState.updateState);
+    /*
+     * Api heads this modeset doesn't change are neither shut down nor
+     * reprogrammed; 2Heads1OR heads among them can stay in the VRR fixed
+     * rate one-shot mode.
+     */
+    for (NvU32 apiHead = 0; apiHead < pDevEvo->numApiHeads; apiHead++) {
+        if (!pProposedDisp->apiHead[apiHead].changed) {
+            unchangedApiHeadMask |= NVBIT(apiHead);
+        }
+    }
+
+    nvDisableVrr(pDispEvo, unchangedApiHeadMask,
+                 &pWorkArea->modesetUpdateState.updateState);
 
     /* Record the current flip state. */
     for (head = 0; head < NVKMS_MAX_HEADS_PER_DISP; head++) {

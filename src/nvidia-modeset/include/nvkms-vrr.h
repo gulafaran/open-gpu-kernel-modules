@@ -44,7 +44,9 @@ void nvAdjustHwModeTimingsForVrrEvo(
     NVHwModeTimingsEvoPtr pTimings);
 
 NvBool nvAnyActiveVrrHeads(const NVDevEvoRec *pDevEvo);
-void nvDisableVrr(NVDispEvoRec *pDispEvo, NVEvoUpdateState *updateState);
+void nvDisableVrr(NVDispEvoRec *pDispEvo,
+                  NvU32 keepFixedRateApiHeadMask,
+                  NVEvoUpdateState *updateState);
 void nvEnableVrr(NVDispEvoRec *pDispEvo, NVEvoUpdateState *updateState);
 void nvEnterVrrFixedRateOneShot(NVDispEvoRec *pDispEvo);
 void nvVrrLfcNotifyFlip(NVDispEvoPtr pDispEvo, const NvU32 apiHead,
