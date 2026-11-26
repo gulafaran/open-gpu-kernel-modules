@@ -684,6 +684,12 @@ static NvU32 VrrRasterPeriodUs(const NVHwModeTimingsEvo *pTimings)
                    pTimings->pixelClockHz);
 }
 
+/*
+ * Only heads that finished the merge mode setup: if
+ * nvEvoEnableMergeModePostModeset() timed out waiting for the raster lock,
+ * the heads stay in NV_EVO_MERGE_MODE_SETUP, and stall locking the
+ * secondary head to a pin whose lock never formed could leave it stalled.
+ */
 static NvBool UseVrrFixedRateOneShot(const NVDispEvoRec *pDispEvo,
                                      NvU32 head)
 {
@@ -691,7 +697,8 @@ static NvBool UseVrrFixedRateOneShot(const NVDispEvoRec *pDispEvo,
 
     return nvHeadIsActive(pDispEvo, head) &&
            (pHeadState->timings.vrr.type == NVKMS_VRR_TYPE_GAMING) &&
-           (pHeadState->mergeMode != NV_EVO_MERGE_MODE_DISABLED) &&
+           ((pHeadState->mergeMode == NV_EVO_MERGE_MODE_PRIMARY) ||
+            (pHeadState->mergeMode == NV_EVO_MERGE_MODE_SECONDARY)) &&
            (VrrRasterPeriodUs(&pHeadState->timings) != 0);
 }
 
