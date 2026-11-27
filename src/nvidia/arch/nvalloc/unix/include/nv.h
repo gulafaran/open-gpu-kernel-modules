@@ -628,6 +628,9 @@ typedef struct nv_state_t
     /* Console is mapped to sysmem instead of GPU PCIe BAR1 or BAR2 */
     NvBool sysmem_mapped_console;
 
+    /* Firmware console was removed by a DRM driver; never cleared again */
+    NvBool fw_console_disabled;
+
     /* Struct to cache the gpu info details */
     nv_cached_gpu_info_t cached_gpu_info;
 

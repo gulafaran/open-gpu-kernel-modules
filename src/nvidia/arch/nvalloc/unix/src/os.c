@@ -6753,6 +6753,7 @@ osDisableConsoleManagement
     nv_state_t *nv  = NV_GET_NV_STATE(pGpu);
 
     nv->client_managed_console = NV_TRUE;
+    nv->fw_console_disabled = NV_TRUE;
 }
 
 /*

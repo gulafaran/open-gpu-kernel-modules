@@ -4876,6 +4876,52 @@ done:
     nvFreeUnixRmHandle(&pDevEvo->handleAllocator, hMemory);
 }
 
+/*
+ * No imported console surface for a framebuffer console: notify RM through a
+ * temporary console memory object. Without reserved console memory in RM the
+ * allocation fails.
+ */
+static void NotifyConsoleDisabledWithoutSurface(NVDevEvoPtr pDevEvo)
+{
+    NvHandle hMemory;
+    NvU32 ret;
+
+    if (pDevEvo->vtFbInfo.width == 0) {
+        // No framebuffer console.
+        return;
+    }
+
+    hMemory = nvGenerateUnixRmHandle(&pDevEvo->handleAllocator);
+    if (hMemory == 0) {
+        return;
+    }
+
+    ret = nvRmApiAlloc(nvEvoGlobal.clientHandle,
+                       pDevEvo->deviceHandle,
+                       hMemory,
+                       NV01_MEMORY_FRAMEBUFFER_CONSOLE,
+                       NULL);
+    if (ret == NVOS_STATUS_SUCCESS) {
+        ret = nvRmApiControl(nvEvoGlobal.clientHandle,
+                             hMemory,
+                             NV0076_CTRL_CMD_NOTIFY_CONSOLE_DISABLED,
+                             NULL, 0);
+        if (ret != NVOS_STATUS_SUCCESS) {
+            nvEvoLogDev(pDevEvo, EVO_LOG_WARN,
+                        "Failed to notify RM that the console is disabled");
+        }
+
+        nvRmApiFree(nvEvoGlobal.clientHandle,
+                    nvEvoGlobal.clientHandle,
+                    hMemory);
+    } else {
+        nvEvoLogDev(pDevEvo, EVO_LOG_WARN,
+                    "No console memory to notify RM that the console is disabled");
+    }
+
+    nvFreeUnixRmHandle(&pDevEvo->handleAllocator, hMemory);
+}
+
 void nvRmUnmapFbConsoleMemory(NVDevEvoPtr pDevEvo)
 {
     struct NvKmsPerOpenDev *pOpenDev = pDevEvo->pNvKmsOpenDev;
@@ -4890,6 +4936,9 @@ void nvRmUnmapFbConsoleMemory(NVDevEvoPtr pDevEvo)
     NvU32 status;
 
     if (!pSurfaceEvo) {
+        if (pDevEvo->fbConsoleSurfaceHandle == 0) {
+            NotifyConsoleDisabledWithoutSurface(pDevEvo);
+        }
         return;
     }
 

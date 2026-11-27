@@ -1927,6 +1927,7 @@ NvBool NV_API_CALL rm_init_adapter(
     NvBool     retval = NV_FALSE;
     void      *fp;
     NvBool     bEnabled;
+    NvBool     bDisableConsoleAccess;
 
     NV_ENTER_RM_RUNTIME(sp,fp);
     threadStateInit(&threadState, THREAD_STATE_FLAGS_DEVICE_INIT);
@@ -1941,7 +1942,9 @@ NvBool NV_API_CALL rm_init_adapter(
     // For GPU driving console, disable console access here, to ensure no console
     // writes through BAR1 can interfere with physical RM's setup of BAR1
     //
-    if (pNv->client_managed_console && !pNv->sysmem_mapped_console)
+    bDisableConsoleAccess = pNv->client_managed_console &&
+                            !pNv->sysmem_mapped_console;
+    if (bDisableConsoleAccess)
     {
         os_disable_console_access();
     }
@@ -1966,7 +1969,7 @@ NvBool NV_API_CALL rm_init_adapter(
         rmapiLockRelease();
     }
 
-    if (pNv->client_managed_console && !pNv->sysmem_mapped_console)
+    if (bDisableConsoleAccess)
     {
         os_enable_console_access();
     }
@@ -1984,13 +1987,16 @@ void NV_API_CALL rm_disable_adapter(
 {
     THREAD_STATE_NODE threadState;
     void      *fp;
+    NvBool     bDisableConsoleAccess;
 
     NV_ENTER_RM_RUNTIME(sp,fp);
     threadStateInit(&threadState, THREAD_STATE_FLAGS_NONE);
 
     NV_ASSERT_OK(os_flush_work_queue(pNv->queue, NV_TRUE));
 
-    if (pNv->client_managed_console && !pNv->sysmem_mapped_console)
+    bDisableConsoleAccess = pNv->client_managed_console &&
+                            !pNv->sysmem_mapped_console;
+    if (bDisableConsoleAccess)
     {
         os_disable_console_access();
     }
@@ -2011,7 +2017,7 @@ void NV_API_CALL rm_disable_adapter(
         rmapiLockRelease();
     }
 
-    if (pNv->client_managed_console && !pNv->sysmem_mapped_console)
+    if (bDisableConsoleAccess)
     {
         os_enable_console_access();
     }
@@ -2028,11 +2034,14 @@ void NV_API_CALL rm_shutdown_adapter(
 {
     THREAD_STATE_NODE threadState;
     void      *fp;
+    NvBool     bDisableConsoleAccess;
 
     NV_ENTER_RM_RUNTIME(sp,fp);
     threadStateInit(&threadState, THREAD_STATE_FLAGS_NONE);
 
-    if (pNv->client_managed_console && !pNv->sysmem_mapped_console)
+    bDisableConsoleAccess = pNv->client_managed_console &&
+                            !pNv->sysmem_mapped_console;
+    if (bDisableConsoleAccess)
     {
         os_disable_console_access();
     }
@@ -2046,7 +2055,7 @@ void NV_API_CALL rm_shutdown_adapter(
         rmapiLockRelease();
     }
 
-    if (pNv->client_managed_console && !pNv->sysmem_mapped_console)
+    if (bDisableConsoleAccess)
     {
         os_enable_console_access();
     }
